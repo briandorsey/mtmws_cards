@@ -61,7 +61,11 @@ impl ZSwitch {
     }
 }
 
-/// State of inputs collected via the ADC mux device
+/// State of inputs collected via the ADC mux device.
+///
+/// Input jacks are represented as an Option, only having a value when a
+/// cable is plugged in. (This doesn't allow reading the value of disconnected
+/// inputs... is that ever useful?)
 #[derive(Clone, Format)]
 struct MuxState {
     main_knob: InputValue,
@@ -70,6 +74,7 @@ struct MuxState {
     zswitch: ZSwitch,
     cv1: Option<InputValue>,
     cv2: Option<InputValue>,
+    sequence_counter: usize,
 }
 
 impl MuxState {
@@ -83,6 +88,7 @@ impl MuxState {
             // NOTE: I get inverted data, and ~2060 as 0v
             cv1: None,
             cv2: None,
+            sequence_counter: 0,
         }
     }
 }
@@ -93,6 +99,9 @@ async fn main(spawner: Spawner) {
     let p = embassy_rp::init(Default::default());
     let mut led5 = Output::new(p.PIN_14, Level::Low);
     let mut led6 = Output::new(p.PIN_15, Level::Low);
+
+    // Normalization probe
+    let mut probe = Output::new(p.PIN_4, Level::Low);
 
     // pulse outputs are inverted
     let mut pulse_1_raw_out = Output::new(p.PIN_8, Level::High);
@@ -128,6 +137,7 @@ async fn main(spawner: Spawner) {
             p.PIN_22,
         ))
         .unwrap();
+    spawner.spawn(periodic_stats()).unwrap();
 
     let mut mux_state = MuxState::default();
     let snd = WATCH_INPUT.sender();
@@ -135,6 +145,29 @@ async fn main(spawner: Spawner) {
 
     // read from physical knobs and switch, write to `mux_state`
     loop {
+        mux_state.sequence_counter = mux_state.sequence_counter.wrapping_add(1);
+
+        // every X loops, check input jacks for plugged in cables
+        if mux_state.sequence_counter % 8 == 0 {
+            match check_normalization(
+                &mut mux_state,
+                &mut muxlogic_a,
+                &mut muxlogic_b,
+                &mut mux_adc,
+                &mut mux_io_2,
+                &mut probe,
+            )
+            .await
+            {
+                Ok(()) => {}
+                Err(e) => error!(
+                    "ADC read failed, while reading normalization probe values: {}",
+                    e
+                ),
+            }
+        }
+
+        // ---- begin default read section
         // read Main knob & cv1
         muxlogic_a.set_low();
         muxlogic_b.set_low();
@@ -150,14 +183,16 @@ async fn main(spawner: Spawner) {
         };
 
         // read cv1 (inverted data)
-        match mux_adc.read(&mut mux_io_2).await {
-            Ok(level) => {
-                let level = InputValue::from_u16_inverted(level);
-                // info!("CV1: MUX_IO_2 ADC: {}", level);
-                mux_state.cv1 = Some(level);
-            }
-            Err(e) => error!("ADC read failed, while reading CV1: {}", e),
-        };
+        if mux_state.cv1.is_some() {
+            match mux_adc.read(&mut mux_io_2).await {
+                Ok(level) => {
+                    let level = InputValue::from_u16_inverted(level);
+                    info!("CV1: MUX_IO_2 ADC: {}", level);
+                    mux_state.cv1 = Some(level);
+                }
+                Err(e) => error!("ADC read failed, while reading CV1: {}", e),
+            };
+        }
 
         // read X knob & cv2
         // NOTE: X and Y appear to be swapped compared to how I read the logic table
@@ -226,16 +261,50 @@ async fn main(spawner: Spawner) {
                 pulse_1_raw_out.set_low();
                 led6.set_low();
                 pulse_2_raw_out.set_high();
+                probe.set_high(); // TODO: delete me
             }
             ZSwitch::Off => {
                 led5.set_low();
                 pulse_1_raw_out.set_high();
                 led6.set_high();
                 pulse_2_raw_out.set_low();
+                probe.set_low(); // TODO: delete me
             }
         }
+
         Timer::after_millis(20).await;
     }
+}
+
+async fn check_normalization<'a, M: adc::Mode>(
+    _mux_state: &mut MuxState,
+    muxlogic_a: &mut Output<'a>,
+    muxlogic_b: &mut Output<'a>,
+    mux_adc: &mut adc::Adc<'a, M>,
+    mux_io_2: &mut adc::Channel<'a>,
+    probe: &mut Output<'a>,
+) -> Result<(), adc::Error> {
+    muxlogic_a.set_low();
+    muxlogic_b.set_low();
+    let level_raw = mux_adc.blocking_read(mux_io_2)?;
+    let level_raw = InputValue::from_u16_inverted(level_raw);
+    probe.set_high();
+    Timer::after_micros(1).await;
+    let level_norm = mux_adc.blocking_read(mux_io_2)?;
+    let level_norm = InputValue::from_u16_inverted(level_norm);
+
+    info!(
+        "probe before {}, after: {}, diff: {}",
+        level_raw,
+        level_norm,
+        level_raw - level_norm
+    );
+
+    // cleanup
+    probe.set_low();
+    muxlogic_a.set_low();
+    muxlogic_b.set_low();
+    Ok(())
 }
 
 // TODO: improve LED scaling.
@@ -246,6 +315,22 @@ fn scale_led_brightness(mut value: u16) -> u16 {
     value = value.saturating_div(2);
     // reduce brightness
     value / 5
+}
+
+#[embassy_executor::task]
+async fn periodic_stats() {
+    let mut mux_rcv = WATCH_INPUT.anon_receiver();
+    let mut last_sequence: usize = 0;
+    loop {
+        if let Some(mux_state) = mux_rcv.try_get() {
+            info!(
+                "main loop rate: {} per sec",
+                mux_state.sequence_counter - last_sequence
+            );
+            last_sequence = mux_state.sequence_counter;
+        }
+        Timer::after_secs(1).await;
+    }
 }
 
 // TODO: read about embassy tasks and peripheral ownership...
