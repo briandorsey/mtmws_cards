@@ -290,18 +290,18 @@ async fn audio_loop(
     loop {
         if let Some(mux_state) = mux_rcv.try_get() {
             // output 1
-            let output_value = mux_state.main_knob.to_output_inverted();
             led1.set_duty_cycle_fraction(
-                scale_led_brightness(2048_u16.saturating_sub(output_value)),
-                2048,
+                scale_led_brightness(mux_state.main_knob.to_output()),
+                2047,
             )
             .unwrap_or_else(|_| {
                 error!(
                     "error setting LED 1 PWM to : {}",
-                    scale_led_brightness(output_value)
+                    scale_led_brightness(mux_state.main_knob.to_output())
                 )
             });
             // write to audio output 1
+            let output_value = mux_state.main_knob.to_output_inverted();
             // the << 4 >> 4 dance clears out the top four bits,
             // to prepare for setting the config bits
             dac_buffer = ((output_value << 4 >> 4) | dac_config_a).to_be_bytes();
@@ -315,17 +315,17 @@ async fn audio_loop(
 
             // output 2
             // write to audio output 2
-            let output_value = mux_state.main_knob.to_output();
             led2.set_duty_cycle_fraction(
-                scale_led_brightness(2048_u16.saturating_sub(output_value)),
+                scale_led_brightness(mux_state.main_knob.to_output_inverted()),
                 2047,
             )
             .unwrap_or_else(|_| {
                 error!(
                     "error setting LED 2 PWM to : {}",
-                    scale_led_brightness(output_value)
+                    scale_led_brightness(mux_state.main_knob.to_output_inverted())
                 )
             });
+            let output_value = mux_state.main_knob.to_output();
             dac_buffer = ((output_value << 4 >> 4) | dac_config_b).to_be_bytes();
             // debug!(
             //     "audio channel 2: {}, {}: buff: 0x{:08b}{:08b}",
@@ -415,9 +415,11 @@ async fn cv_loop(
                 .unwrap_or_else(|_| {
                     error!(
                         "error setting CV1 PWM to : {}",
-                        2047_u16.saturating_sub(mux_state.x_knob.to_output_inverted())
+                        mux_state.x_knob.to_output_inverted()
                     )
                 });
+
+            // prototype attenuverting logic
             let mut y_value = mux_state.y_knob;
             if let Some(input_cv) = mux_state.cv2 {
                 y_value = y_value * input_cv / InputValue::OFFSET;
