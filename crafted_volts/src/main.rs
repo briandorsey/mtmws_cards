@@ -26,13 +26,15 @@ use wscomp::InputValue;
 // most inputs seem to be numbers from 0..4096 (12 bit), sometimes inverted from the thing they represent.
 // most outputs seem to be numbers from 0..2048 (11 bit), sometimes inverted from the thing they represent.
 
-// TODO: review all math, refactor and simplify, add clamp(), scale()
-// TODO: smooth analog knob reads
+// TODO: speed up input processing loop
+// TODO: use normalization probe to only mix when inputs are plugged (needed for attenuation math)
+// TODO: smooth analog knob reads, maybe inside InputValue?
 // TODO: decide how to handle all unwraps properly
 // TODO: review pwm frequencies
 // future features
 // TODO: implement audio input mixing / attenuation?
 // TODO: implement CV input mixing / attenuation?
+// TODO: consider moving inversion logic into InputValue?
 // TODO: implement pulse input mixing / attenuation?
 // TODO: consider event based pulse updates: only change pulse outputs on switch change or pulse input edge detection (rather than on a loop)
 // TODO: read and use calibration data from EEPROM
@@ -66,8 +68,8 @@ struct MuxState {
     x_knob: InputValue,
     y_knob: InputValue,
     zswitch: ZSwitch,
-    cv1: u16,
-    cv2: u16,
+    cv1: Option<InputValue>,
+    cv2: Option<InputValue>,
 }
 
 impl MuxState {
@@ -79,8 +81,8 @@ impl MuxState {
             zswitch: ZSwitch::default(),
             // CV inputs are not inverted according to docs.  0V reads ~ 2030
             // NOTE: I get inverted data, and ~2060 as 0v
-            cv1: 2060,
-            cv2: 2060,
+            cv1: None,
+            cv2: None,
         }
     }
 }
@@ -147,10 +149,12 @@ async fn main(spawner: Spawner) {
             Err(e) => error!("ADC read failed, while reading Main: {}", e),
         };
 
+        // read cv1 (inverted data)
         match mux_adc.read(&mut mux_io_2).await {
             Ok(level) => {
+                let level = InputValue::from_u16_inverted(level);
                 // info!("CV1: MUX_IO_2 ADC: {}", level);
-                mux_state.cv1 = level;
+                mux_state.cv1 = Some(level);
             }
             Err(e) => error!("ADC read failed, while reading CV1: {}", e),
         };
@@ -171,10 +175,12 @@ async fn main(spawner: Spawner) {
             Err(e) => error!("ADC read failed, while reading X: {}", e),
         };
 
+        // read cv2 (inverted data)
         match mux_adc.read(&mut mux_io_2).await {
             Ok(level) => {
+                let level = InputValue::from_u16_inverted(level);
                 // info!("CV2: MUX_IO_2 ADC: {}", level);
-                mux_state.cv2 = level;
+                mux_state.cv2 = Some(level);
             }
             Err(e) => error!("ADC read failed, while reading CV2: {}", e),
         };
@@ -377,27 +383,23 @@ async fn cv_loop(
     };
     let mut mux_rcv = WATCH_INPUT.anon_receiver();
 
-    let mut x_output: u16;
-    let mut y_output: u16;
     // TODO: decide how to handle these errors when setting PWM.
     loop {
         if let Some(mux_state) = mux_rcv.try_get() {
             // info!("X value: {:?}", mux_state.x_knob);
-            x_output = mux_state.x_knob.to_output();
-            y_output = mux_state.y_knob.to_output();
 
-            led3.set_duty_cycle_fraction(scale_led_brightness(x_output), 2047)
+            led3.set_duty_cycle_fraction(scale_led_brightness(mux_state.x_knob.to_output()), 2047)
                 .unwrap_or_else(|_| {
                     error!(
                         "error setting LED 3 PWM to : {}",
-                        scale_led_brightness(x_output)
+                        scale_led_brightness(mux_state.x_knob.to_output())
                     )
                 });
-            led4.set_duty_cycle_fraction(scale_led_brightness(y_output), 2047)
+            led4.set_duty_cycle_fraction(scale_led_brightness(mux_state.y_knob.to_output()), 2047)
                 .unwrap_or_else(|_| {
                     error!(
                         "error setting LED 4 PWM to : {}",
-                        scale_led_brightness(y_output)
+                        scale_led_brightness(mux_state.y_knob.to_output())
                     )
                 });
 
@@ -409,19 +411,23 @@ async fn cv_loop(
             //     2047_u16.saturating_sub(x_output)
             // );
             cv1_pwm
-                .set_duty_cycle_fraction(2047_u16.saturating_sub(x_output), 2047)
+                .set_duty_cycle_fraction(mux_state.x_knob.to_output_inverted(), 2047)
                 .unwrap_or_else(|_| {
                     error!(
                         "error setting CV1 PWM to : {}",
-                        2047_u16.saturating_sub(x_output)
+                        2047_u16.saturating_sub(mux_state.x_knob.to_output_inverted())
                     )
                 });
+            let mut y_value = mux_state.y_knob;
+            if let Some(input_cv) = mux_state.cv2 {
+                y_value = y_value * input_cv / InputValue::OFFSET;
+            }
             cv2_pwm
-                .set_duty_cycle_fraction(2047_u16.saturating_sub(y_output), 2047)
+                .set_duty_cycle_fraction(y_value.to_output_inverted(), 2047)
                 .unwrap_or_else(|_| {
                     error!(
                         "error setting CV2 PWM to : {}",
-                        2047_u16.saturating_sub(y_output)
+                        y_value.to_output_inverted()
                     )
                 });
         }
