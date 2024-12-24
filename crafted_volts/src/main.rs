@@ -17,6 +17,8 @@ use embassy_time::Timer;
 use gpio::{Level, Output};
 use {defmt_rtt as _, panic_probe as _};
 
+use wscomp::InputValue;
+
 // high level notes...
 // This is an attempt to learn how use all inputs & outputs of the Music Thing Modular Workshop System Computer via Rust
 // The card maps knobs and the switch to manually set voltages.
@@ -43,6 +45,7 @@ bind_interrupts!(struct Irqs {
 // single writer, multple reader
 static WATCH_INPUT: Watch<CriticalSectionRawMutex, MuxState, 2> = Watch::new();
 
+/// The state of the three position Z switch
 #[derive(Clone, Format)]
 enum ZSwitch {
     On,
@@ -56,13 +59,12 @@ impl ZSwitch {
     }
 }
 
-// currently saving raw input values.
-// TODO: decide on a normalization strategy (rp2040 doesn't have FP)
+/// State of inputs collected via the ADC mux device
 #[derive(Clone, Format)]
 struct MuxState {
-    main_knob: u16,
-    x_knob: u16,
-    y_knob: u16,
+    main_knob: InputValue,
+    x_knob: InputValue,
+    y_knob: InputValue,
     zswitch: ZSwitch,
     cv1: u16,
     cv2: u16,
@@ -71,9 +73,9 @@ struct MuxState {
 impl MuxState {
     fn default() -> Self {
         MuxState {
-            main_knob: 2048,
-            x_knob: 2048,
-            y_knob: 2048,
+            main_knob: InputValue::new(InputValue::CENTER),
+            x_knob: InputValue::new(InputValue::CENTER),
+            y_knob: InputValue::new(InputValue::CENTER),
             zswitch: ZSwitch::default(),
             // CV inputs are not inverted according to docs.  0V reads ~ 2030
             // NOTE: I get inverted data, and ~2060 as 0v
@@ -140,7 +142,7 @@ async fn main(spawner: Spawner) {
         match mux_adc.read(&mut mux_io_1).await {
             Ok(level) => {
                 // info!("M knob: MUX_IO_1 ADC: {}", level);
-                mux_state.main_knob = level;
+                mux_state.main_knob = InputValue::from_u16(level);
             }
             Err(e) => error!("ADC read failed, while reading Main: {}", e),
         };
@@ -164,7 +166,7 @@ async fn main(spawner: Spawner) {
         match mux_adc.read(&mut mux_io_1).await {
             Ok(level) => {
                 // info!("X knob: MUX_IO_1 ADC: {}", level);
-                mux_state.x_knob = level;
+                mux_state.x_knob = InputValue::from_u16(level);
             }
             Err(e) => error!("ADC read failed, while reading X: {}", e),
         };
@@ -186,7 +188,7 @@ async fn main(spawner: Spawner) {
         match mux_adc.read(&mut mux_io_1).await {
             Ok(level) => {
                 // info!("Y knob: MUX_IO_1 ADC: {}", level);
-                mux_state.y_knob = level;
+                mux_state.y_knob = InputValue::from_u16(level);
             }
             Err(e) => error!("ADC read failed, while reading Y: {}", e),
         };
@@ -240,14 +242,6 @@ fn scale_led_brightness(mut value: u16) -> u16 {
     value / 5
 }
 
-fn clamp_output(mut value: u16) -> u16 {
-    if value >= 2048 {
-        warn!("clamp_output(): value above limit: {}", value);
-        value = 2047;
-    }
-    value
-}
-
 // TODO: read about embassy tasks and peripheral ownership...
 // do I need to pass them this way?
 #[allow(clippy::too_many_arguments)]
@@ -290,7 +284,7 @@ async fn audio_loop(
     loop {
         if let Some(mux_state) = mux_rcv.try_get() {
             // output 1
-            let output_value = clamp_output(2048_u16.saturating_sub(mux_state.main_knob / 2));
+            let output_value = mux_state.main_knob.to_output_inverted();
             led1.set_duty_cycle_fraction(
                 scale_led_brightness(2048_u16.saturating_sub(output_value)),
                 2048,
@@ -315,7 +309,7 @@ async fn audio_loop(
 
             // output 2
             // write to audio output 2
-            let output_value = clamp_output(mux_state.main_knob / 2);
+            let output_value = mux_state.main_knob.to_output();
             led2.set_duty_cycle_fraction(
                 scale_led_brightness(2048_u16.saturating_sub(output_value)),
                 2047,
@@ -389,8 +383,8 @@ async fn cv_loop(
     loop {
         if let Some(mux_state) = mux_rcv.try_get() {
             // info!("X value: {:?}", mux_state.x_knob);
-            x_output = clamp_output(mux_state.x_knob / 2);
-            y_output = clamp_output(mux_state.y_knob / 2);
+            x_output = mux_state.x_knob.to_output();
+            y_output = mux_state.y_knob.to_output();
 
             led3.set_duty_cycle_fraction(scale_led_brightness(x_output), 2047)
                 .unwrap_or_else(|_| {

@@ -7,6 +7,7 @@ license = "MIT OR Apache-2.0"
 edition = "2021"
 
 [dependencies]
+wscomp = { path = "../wscomp" }
 defmt = "0.3"
 defmt-rtt = "0.4"
 
@@ -27,6 +28,10 @@ embassy-rp = { version = "0.2.0", path = "../../embassy/embassy-rp", features = 
 embassy-time = { version = "0.3.2", path = "../../embassy/embassy-time", features = ["defmt"] }
 embassy-sync = { version = "0.6.1", features = ["defmt"] }
 embassy-executor = { version = "0.6.3", path = "../../embassy/embassy-executor", features = ["defmt", "task-arena-size-98304", "arch-cortex-m", "executor-thread", "executor-interrupt", "integrated-timers"] }
+
+[[bin]]
+name = "crafted_volts"
+test = false
 
 [profile.release]
 debug = 2
