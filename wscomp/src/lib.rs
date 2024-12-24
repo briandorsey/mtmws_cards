@@ -10,7 +10,18 @@ use derive_more::Shr;
 /// Conversions from/to this type saturate (clamp) - they stop at the min/max
 /// values without giving errors. Before converting, raw internal value may be
 /// outside of 12 bit range (allowing for math & accumulations, etc).
-#[derive(Debug, Format, PartialEq, Clone, derive_more::Add, derive_more::Sub)]
+#[derive(
+    Debug,
+    Format,
+    PartialEq,
+    Copy,
+    Clone,
+    derive_more::Add,
+    derive_more::Sub,
+    derive_more::Mul,
+    derive_more::Div,
+)]
+#[mul(forward)]
 pub struct InputValue(i32);
 
 // CONST values for min/max values? (12 bit limits)
@@ -25,10 +36,16 @@ impl InputValue {
         InputValue(value)
     }
 
-    // TODO: intering versions of from/to
+    /// Convert from u16 and offset value so center is at zero
     pub fn from_u16(value: u16) -> Self {
         let output = i32::from(value);
         Self(output - Self::OFFSET)
+    }
+
+    /// Convert from u16 and offset value so center is at zero, then invert
+    pub fn from_u16_inverted(value: u16) -> Self {
+        let output = i32::from(value);
+        Self(output - Self::OFFSET) * InputValue::new(-1)
     }
 
     /// Saturating conversion into 11 bit safe u16 for output
@@ -88,5 +105,10 @@ mod test {
 
         let below_range = InputValue::from_u16(0) - InputValue::new(5000);
         assert_eq!(below_range.to_output(), 0_u16);
+    }
+
+    #[test]
+    fn test_input_value_math() {
+        assert_eq!(InputValue(123) * InputValue(1), InputValue(123));
     }
 }
