@@ -20,23 +20,22 @@ use {defmt_rtt as _, panic_probe as _};
 
 use wscomp::InputValue;
 
-// high level notes...
-// This is an attempt to learn how use all inputs & outputs of the Music Thing Modular Workshop System Computer via Rust
+// This is an attempt to learn how use all inputs & outputs of the Music Thing Modular Workshop System Computer via Rust & Embassy.
 // The card maps knobs and the switch to manually set voltages.
 
-// most inputs seem to be numbers from 0..4096 (12 bit), sometimes inverted from the thing they represent.
-// most outputs seem to be numbers from 0..2048 (11 bit), sometimes inverted from the thing they represent.
+// inputs seem to be numbers from 0..4096 (12 bit), sometimes inverted from the thing they represent.
+// outputs seem to be numbers from 0..2048 (11 bit), sometimes inverted from the thing they represent.
 
-// TODO: speed up input processing loop
 // TODO: use normalization probe to only mix when inputs are plugged (needed for attenuation math)
-// TODO: smooth analog knob reads, maybe inside InputValue?
+// TODO: implement audio input mixing / attenuation?
+// TODO: implement CV input mixing / attenuation?
+// TODO: implement LED brightness scaling (gamma correction)
 // TODO: decide how to handle all unwraps properly
 // TODO: review pwm frequencies
 // future features
-// TODO: implement audio input mixing / attenuation?
-// TODO: implement CV input mixing / attenuation?
-// TODO: experiment with task communication to eliminate clone of MuxState
 // TODO: implement pulse input mixing / attenuation?
+// TODO: move more data strctures and logic into shared wscomp library
+// TODO: experiment with task communication to eliminate clone of MuxState
 // TODO: consider event based pulse updates: only change pulse outputs on switch change or pulse input edge detection (rather than on a loop)
 // TODO: read and use calibration data from EEPROM
 // TODO: read about defmt levels and overhead (can we leave logging statements in a release build? What are the effects?)
