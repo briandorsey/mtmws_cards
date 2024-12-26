@@ -26,10 +26,11 @@ use wscomp::{InputValue, JackValue};
 // inputs seem to be numbers from 0..4096 (12 bit), sometimes inverted from the thing they represent.
 // outputs seem to be numbers from 0..2048 (11 bit), sometimes inverted from the thing they represent.
 
-// TODO: implement audio input mixing / attenuation?
+// TODO: when attenuverting, LEDs should reflect output voltage, not knob
 // TODO: implement LED brightness scaling (gamma correction)
 // TODO: decide how to handle all unwraps properly
 // TODO: review pwm frequencies
+// TODO: extract into pulse update logic into a task
 // future features
 // TODO: implement pulse input mixing / attenuation?
 // TODO: move more data strctures and logic into shared wscomp library
@@ -37,13 +38,16 @@ use wscomp::{InputValue, JackValue};
 // TODO: consider event based pulse updates: only change pulse outputs on switch change or pulse input edge detection (rather than on a loop)
 // TODO: read and use calibration data from EEPROM
 // TODO: read about defmt levels and overhead (can we leave logging statements in a release build? What are the effects?)
+// TODO: read about embassy tasks and peripheral ownership...
+// do I need to pass them this way?
 
 bind_interrupts!(struct Irqs {
     ADC_IRQ_FIFO => adc::InterruptHandler;
 });
 
 // single writer, multple reader
-static WATCH_INPUT: Watch<CriticalSectionRawMutex, MuxState, 2> = Watch::new();
+static MUX_INPUT: Watch<CriticalSectionRawMutex, MuxState, 2> = Watch::new();
+static AUDIO_INPUT: Watch<CriticalSectionRawMutex, AudioState, 2> = Watch::new();
 
 /// The state of the three position Z switch
 #[derive(Clone, Format)]
@@ -60,10 +64,6 @@ impl ZSwitch {
 }
 
 /// State of inputs collected via the ADC mux device.
-///
-/// Input jacks are represented as an Option, only having a value when a
-/// cable is plugged in. (This doesn't allow reading the value of disconnected
-/// inputs... is that ever useful?)
 #[derive(Clone, Format)]
 struct MuxState {
     main_knob: InputValue,
@@ -97,6 +97,28 @@ impl MuxState {
     }
 }
 
+/// State of audio inputs collected via direct ADC.
+#[derive(Clone, Format)]
+struct AudioState {
+    audio1: JackValue,
+    audio2: JackValue,
+}
+
+impl AudioState {
+    fn default() -> Self {
+        AudioState {
+            audio1: JackValue::new(
+                InputValue::new(InputValue::CENTER, true),
+                InputValue::new(InputValue::CENTER, true),
+            ),
+            audio2: JackValue::new(
+                InputValue::new(InputValue::CENTER, true),
+                InputValue::new(InputValue::CENTER, true),
+            ),
+        }
+    }
+}
+
 #[embassy_executor::main]
 async fn main(spawner: Spawner) {
     info!("Starting main()");
@@ -115,9 +137,13 @@ async fn main(spawner: Spawner) {
     let mut muxlogic_a = Output::new(p.PIN_24, Level::Low);
     let mut muxlogic_b = Output::new(p.PIN_25, Level::Low);
 
-    let mut mux_adc = adc::Adc::new(p.ADC, Irqs, adc::Config::default());
+    let mut adc_device = adc::Adc::new(p.ADC, Irqs, adc::Config::default());
     let mut mux_io_1 = adc::Channel::new_pin(p.PIN_28, gpio::Pull::None);
     let mut mux_io_2 = adc::Channel::new_pin(p.PIN_29, gpio::Pull::None);
+
+    // audio input setup (used for CV in this card)
+    let mut audio1 = adc::Channel::new_pin(p.PIN_27, gpio::Pull::None);
+    let mut audio2 = adc::Channel::new_pin(p.PIN_26, gpio::Pull::None);
 
     spawner
         .spawn(audio_loop(
@@ -144,12 +170,48 @@ async fn main(spawner: Spawner) {
     spawner.spawn(periodic_stats()).unwrap();
 
     let mut mux_state = MuxState::default();
-    let snd = WATCH_INPUT.sender();
+    let mux_snd = MUX_INPUT.sender();
+    let mut audio_state = AudioState::default();
+    let audio_snd = AUDIO_INPUT.sender();
     let mux_settle_micros = 1;
 
-    // read from physical knobs and switch, write to `mux_state`
+    // read from physical knobs, inputs and switch, write to `mux_state`
     loop {
         mux_state.sequence_counter = mux_state.sequence_counter.wrapping_add(1);
+
+        // read audio inputs and their normalization probe inputs
+        match adc_device.read(&mut audio1).await {
+            Ok(level) => {
+                audio_state.audio1.raw.update(level);
+                // info!("audio1: {}, {}", level, mux_state.audio1.to_output());
+            }
+            Err(e) => error!("ADC read failed, while reading audio1: {}", e),
+        };
+        match adc_device.read(&mut audio2).await {
+            Ok(level) => {
+                audio_state.audio2.raw.update(level);
+                // info!("audio2: {}, {}", level, mux_state.audio2.to_output());
+            }
+            Err(e) => error!("ADC read failed, while reading audio2: {}", e),
+        };
+
+        probe.set_high();
+        Timer::after_micros(mux_settle_micros).await;
+        match adc_device.read(&mut audio1).await {
+            Ok(level) => {
+                audio_state.audio1.probe.update(level);
+                // info!("audio1: {}, {}", level, mux_state.audio1.to_output());
+            }
+            Err(e) => error!("ADC read failed, while reading audio1: {}", e),
+        };
+        match adc_device.read(&mut audio2).await {
+            Ok(level) => {
+                audio_state.audio2.probe.update(level);
+                // info!("audio2: {}, {}", level, mux_state.audio2.to_output());
+            }
+            Err(e) => error!("ADC read failed, while reading audio2: {}", e),
+        };
+        probe.set_low();
 
         // read Main knob & cv1
         muxlogic_a.set_low();
@@ -157,7 +219,7 @@ async fn main(spawner: Spawner) {
         // this seems to need a delay for pins to settle before reading.
         Timer::after_micros(mux_settle_micros).await;
 
-        match mux_adc.read(&mut mux_io_1).await {
+        match adc_device.read(&mut mux_io_1).await {
             Ok(level) => {
                 mux_state.main_knob.update(level);
                 // info!("M knob: {}, {}", level, mux_state.main_knob.to_output());
@@ -166,7 +228,7 @@ async fn main(spawner: Spawner) {
         };
 
         // read cv1 (inverted data)
-        match mux_adc.read(&mut mux_io_2).await {
+        match adc_device.read(&mut mux_io_2).await {
             Ok(level) => {
                 mux_state.cv1.raw.update(level);
                 // info!("cv1: {}, {}", level, mux_state.cv1.to_output());
@@ -175,7 +237,7 @@ async fn main(spawner: Spawner) {
         };
         probe.set_high();
         Timer::after_micros(mux_settle_micros).await;
-        match mux_adc.read(&mut mux_io_2).await {
+        match adc_device.read(&mut mux_io_2).await {
             Ok(level) => {
                 mux_state.cv1.probe.update(level);
                 // info!("cv1: {}, {}", level, mux_state.cv1.to_output());
@@ -192,7 +254,7 @@ async fn main(spawner: Spawner) {
         // this seems to need a delay for pins to settle before reading.
         Timer::after_micros(mux_settle_micros).await;
 
-        match mux_adc.read(&mut mux_io_1).await {
+        match adc_device.read(&mut mux_io_1).await {
             Ok(level) => {
                 mux_state.x_knob.update(level);
                 // info!("x knob: {}, {}", level, mux_state.x_knob.to_output());
@@ -201,7 +263,7 @@ async fn main(spawner: Spawner) {
         };
 
         // read cv2 (inverted data)
-        match mux_adc.read(&mut mux_io_2).await {
+        match adc_device.read(&mut mux_io_2).await {
             Ok(level) => {
                 mux_state.cv2.raw.update(level);
                 // info!("cv2: {}, {}", level, mux_state.cv2.raw.to_output());
@@ -210,7 +272,7 @@ async fn main(spawner: Spawner) {
         };
         probe.set_high();
         Timer::after_micros(mux_settle_micros).await;
-        match mux_adc.read(&mut mux_io_2).await {
+        match adc_device.read(&mut mux_io_2).await {
             Ok(level) => {
                 mux_state.cv2.probe.update(level);
                 // info!("cv2: {}, {}", level, mux_state.cv2.raw.to_output());
@@ -225,7 +287,7 @@ async fn main(spawner: Spawner) {
         // this seems to need 1us delay for pins to 'settle' before reading.
         Timer::after_micros(mux_settle_micros).await;
 
-        match mux_adc.read(&mut mux_io_1).await {
+        match adc_device.read(&mut mux_io_1).await {
             Ok(level) => {
                 mux_state.y_knob.update(level);
                 // info!("y knob: {}, {}", level, mux_state.y_knob.to_output());
@@ -239,7 +301,7 @@ async fn main(spawner: Spawner) {
         // this seems to need 1us delay for pins to 'settle' before reading.
         Timer::after_micros(mux_settle_micros).await;
 
-        match mux_adc.read(&mut mux_io_1).await {
+        match adc_device.read(&mut mux_io_1).await {
             Ok(level) => {
                 // info!("MUX_IO_1 ADC: {}", level);
                 mux_state.zswitch = match level {
@@ -251,9 +313,9 @@ async fn main(spawner: Spawner) {
             Err(e) => error!("ADC read failed, while reading Z: {}", e),
         };
 
-        snd.send(mux_state.clone());
+        mux_snd.send(mux_state.clone());
+        audio_snd.send(audio_state.clone());
 
-        // TODO: extract into task dedicated to pulses
         // update pulses
         match mux_state.zswitch {
             ZSwitch::On | ZSwitch::Momentary => {
@@ -287,7 +349,7 @@ fn scale_led_brightness(mut value: u16) -> u16 {
 
 #[embassy_executor::task]
 async fn periodic_stats() {
-    let mut mux_rcv = WATCH_INPUT.anon_receiver();
+    let mut mux_rcv = MUX_INPUT.anon_receiver();
     let mut last_sequence: usize = 0;
     loop {
         if let Some(mux_state) = mux_rcv.try_get() {
@@ -301,8 +363,6 @@ async fn periodic_stats() {
     }
 }
 
-// TODO: read about embassy tasks and peripheral ownership...
-// do I need to pass them this way?
 #[allow(clippy::too_many_arguments)]
 #[embassy_executor::task]
 async fn audio_loop(
@@ -315,7 +375,8 @@ async fn audio_loop(
     dma0: peripherals::DMA_CH0,
     cs_pin: peripherals::PIN_21,
 ) {
-    let mut mux_rcv = WATCH_INPUT.anon_receiver();
+    let mut mux_rcv = MUX_INPUT.anon_receiver();
+    let mut audio_rcv = AUDIO_INPUT.anon_receiver();
 
     // LED setup
     let mut c = pwm::Config::default();
@@ -341,8 +402,8 @@ async fn audio_loop(
     let mut dac_buffer: [u8; 2];
 
     loop {
-        if let Some(mux_state) = mux_rcv.try_get() {
-            // output 1
+        if let (Some(mux_state), Some(audio_state)) = (mux_rcv.try_get(), audio_rcv.try_get()) {
+            // audio LEDs
             led1.set_duty_cycle_fraction(
                 scale_led_brightness(mux_state.main_knob.to_output()),
                 2047,
@@ -353,21 +414,6 @@ async fn audio_loop(
                     scale_led_brightness(mux_state.main_knob.to_output())
                 )
             });
-            // write to audio output 1
-            let output_value = mux_state.main_knob.to_output_inverted();
-            // the << 4 >> 4 dance clears out the top four bits,
-            // to prepare for setting the config bits
-            dac_buffer = ((output_value << 4 >> 4) | dac_config_a).to_be_bytes();
-            // debug!(
-            //     "audio channel 1: {}, {}: buff: 0x{:08b}{:08b}",
-            //     mux_state.main_knob, output_value, dac_buffer[0], dac_buffer[1]
-            // );
-            cs.set_low();
-            spi.blocking_write(&dac_buffer).unwrap();
-            cs.set_high();
-
-            // output 2
-            // write to audio output 2
             led2.set_duty_cycle_fraction(
                 scale_led_brightness(mux_state.main_knob.to_output_inverted()),
                 2047,
@@ -378,8 +424,37 @@ async fn audio_loop(
                     scale_led_brightness(mux_state.main_knob.to_output_inverted())
                 )
             });
-            let output_value = mux_state.main_knob.to_output();
-            dac_buffer = ((output_value << 4 >> 4) | dac_config_b).to_be_bytes();
+
+            // write to audio outputs
+            let mut output_value = mux_state.main_knob;
+            // If cable plugged into audio inputs, mix then attenuvert that signal
+            match (
+                audio_state.audio1.plugged_value(),
+                audio_state.audio2.plugged_value(),
+            ) {
+                (Some(in1), Some(in2)) => {
+                    let mix = (*in1 + *in2) / 2;
+                    output_value = (mix * output_value) / InputValue::OFFSET;
+                }
+                (Some(input), None) | (None, Some(input)) => {
+                    output_value = (*input * output_value) / InputValue::OFFSET;
+                }
+                (None, None) => {}
+            }
+
+            // the << 4 >> 4 dance clears out the top four bits,
+            // to prepare for setting the config bits
+            dac_buffer =
+                ((output_value.to_output_inverted() << 4 >> 4) | dac_config_a).to_be_bytes();
+            // debug!(
+            //     "audio channel 1: {}, {}: buff: 0x{:08b}{:08b}",
+            //     mux_state.main_knob, output_value, dac_buffer[0], dac_buffer[1]
+            // );
+            cs.set_low();
+            spi.blocking_write(&dac_buffer).unwrap();
+            cs.set_high();
+
+            dac_buffer = ((output_value.to_output() << 4 >> 4) | dac_config_b).to_be_bytes();
             // debug!(
             //     "audio channel 2: {}, {}: buff: 0x{:08b}{:08b}",
             //     mux_state.main_knob, output_value, dac_buffer[0], dac_buffer[1]
@@ -434,9 +509,8 @@ async fn cv_loop(
         error!("Error setting up LED PWM channels for cv_loop");
         return;
     };
-    let mut mux_rcv = WATCH_INPUT.anon_receiver();
+    let mut mux_rcv = MUX_INPUT.anon_receiver();
 
-    // TODO: decide how to handle these errors when setting PWM.
     loop {
         if let Some(mux_state) = mux_rcv.try_get() {
             // info!("X value: {:?}", mux_state.x_knob);

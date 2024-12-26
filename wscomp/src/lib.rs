@@ -1,7 +1,7 @@
 #![cfg_attr(not(test), no_std)]
 
 use core::fmt::Debug;
-use core::ops::{Div, Mul, Shr, Sub};
+use core::ops::{Add, Div, Mul, Shr, Sub};
 
 use defmt::*;
 
@@ -37,7 +37,7 @@ impl InputValue {
     pub const MAX: i32 = 2_i32.pow(11) - 1;
     pub const CENTER: i32 = 0;
     pub const OFFSET: i32 = 2_i32.pow(11);
-    const ACCUM_BITS: u8 = 4;
+    const ACCUM_BITS: u8 = 3;
 
     // New `InputValue` from i32
     pub fn new(raw_value: i32, invert: bool) -> Self {
@@ -83,6 +83,15 @@ impl InputValue {
 
     pub fn to_clamped(&self) -> i32 {
         (self.accumulated_raw >> Self::ACCUM_BITS).clamp(Self::MIN, Self::MAX)
+    }
+}
+
+impl Add for InputValue {
+    type Output = Self;
+
+    fn add(mut self, rhs: Self) -> Self::Output {
+        self.accumulated_raw += rhs.accumulated_raw;
+        self
     }
 }
 
@@ -248,6 +257,11 @@ mod test {
 
     #[test]
     fn test_input_value_math() {
+        assert_eq!(
+            InputValue::new(123, false) + InputValue::new(456, false),
+            InputValue::new(579, false)
+        );
+
         assert_eq!(InputValue::new(123, false) * 1, InputValue::new(123, false));
         assert_eq!(InputValue::new(123, false) * 2, InputValue::new(246, false));
         assert_eq!(
