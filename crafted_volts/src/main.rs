@@ -26,7 +26,6 @@ use wscomp::{InputValue, JackValue};
 // inputs seem to be numbers from 0..4096 (12 bit), sometimes inverted from the thing they represent.
 // outputs seem to be numbers from 0..2048 (11 bit), sometimes inverted from the thing they represent.
 
-// TODO: implement LED brightness scaling (gamma correction)
 // TODO: decide how to handle all unwraps properly
 // TODO: review pwm frequencies
 // TODO: extract into pulse update logic into a task
@@ -336,14 +335,11 @@ async fn main(spawner: Spawner) {
     }
 }
 
-// TODO: improve LED scaling.
-// TODO: probably need to make it exponential?
-// Also seems like LEDs 1 & 2 might need different brightness curve than 3 & 4?
-fn scale_led_brightness(mut value: u16) -> u16 {
-    // can't see the difference between the top half of the scale
-    value = value.saturating_div(2);
-    // reduce brightness
-    value / 5
+/// Rough LED brightness correction
+fn led_gamma(value: u16) -> u16 {
+    // based on: https://github.com/TomWhitwell/Workshop_Computer/blob/main/Demonstrations%2BHelloWorlds/CircuitPython/mtm_computer.py
+    let temp: u32 = value.into();
+    ((temp * temp) / 2048).clamp(0, u16::MAX.into()) as u16
 }
 
 #[embassy_executor::task]
@@ -441,23 +437,20 @@ async fn audio_loop(
             cs.set_high();
 
             // audio LEDs
-            led1.set_duty_cycle_fraction(scale_led_brightness(output_value.to_output()), 2047)
+            led1.set_duty_cycle_fraction(led_gamma(output_value.to_output()), 2047)
                 .unwrap_or_else(|_| {
                     error!(
                         "error setting LED 1 PWM to : {}",
-                        scale_led_brightness(output_value.to_output())
+                        led_gamma(output_value.to_output())
                     )
                 });
-            led2.set_duty_cycle_fraction(
-                scale_led_brightness(output_value.to_output_inverted()),
-                2047,
-            )
-            .unwrap_or_else(|_| {
-                error!(
-                    "error setting LED 2 PWM to : {}",
-                    scale_led_brightness(output_value.to_output_inverted())
-                )
-            });
+            led2.set_duty_cycle_fraction(led_gamma(output_value.to_output_inverted()), 2047)
+                .unwrap_or_else(|_| {
+                    error!(
+                        "error setting LED 2 PWM to : {}",
+                        led_gamma(output_value.to_output_inverted())
+                    )
+                });
         }
         Timer::after_millis(20).await;
     }
@@ -549,18 +542,18 @@ async fn cv_loop(
                 });
 
             // LEDs
-            led3.set_duty_cycle_fraction(scale_led_brightness(x_value.to_output()), 2047)
+            led3.set_duty_cycle_fraction(led_gamma(x_value.to_output()), 2047)
                 .unwrap_or_else(|_| {
                     error!(
                         "error setting LED 3 PWM to : {}",
-                        scale_led_brightness(x_value.to_output())
+                        led_gamma(x_value.to_output())
                     )
                 });
-            led4.set_duty_cycle_fraction(scale_led_brightness(y_value.to_output()), 2047)
+            led4.set_duty_cycle_fraction(led_gamma(y_value.to_output()), 2047)
                 .unwrap_or_else(|_| {
                     error!(
                         "error setting LED 4 PWM to : {}",
-                        scale_led_brightness(y_value.to_output())
+                        led_gamma(y_value.to_output())
                     )
                 });
         }
