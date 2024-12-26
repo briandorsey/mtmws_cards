@@ -26,11 +26,9 @@ use wscomp::{InputValue, JackValue};
 // inputs seem to be numbers from 0..4096 (12 bit), sometimes inverted from the thing they represent.
 // outputs seem to be numbers from 0..2048 (11 bit), sometimes inverted from the thing they represent.
 
-// TODO: decide how to handle all unwraps properly
-// TODO: review pwm frequencies
 // TODO: extract into pulse update logic into a task
-// future features
-// TODO: implement pulse input mixing / attenuation?
+// future features, maybe
+// TODO: implement pulse input mixing/logic?
 // TODO: move more data strctures and logic into shared wscomp library
 // TODO: experiment with task communication to eliminate clone of MuxState
 // TODO: consider event based pulse updates: only change pulse outputs on switch change or pulse input edge detection (rather than on a loop)
@@ -376,7 +374,8 @@ async fn audio_loop(
 
     // LED setup
     let mut c = pwm::Config::default();
-    c.top = 20470; // 11 bit PWM * 10
+    // 11 bit PWM * 10. 10x is to increase PWM rate, reducing visible flicker.
+    c.top = 20470;
 
     let pwm5 = pwm::Pwm::new_output_ab(led_pwm_slice, led1_pin, led2_pin, c.clone());
     let (Some(mut led1), Some(mut led2)) = pwm5.split() else {
@@ -471,6 +470,7 @@ async fn cv_loop(
     // If we aim for a specific frequency, here is how we can calculate the top value.
     // The top value sets the period of the PWM cycle, so a counter goes from 0 to top and then wraps around to 0.
     // Every such wraparound is one PWM cycle. So here is how we get 60KHz:
+    // 60khz target from Computer docs
     let desired_freq_hz = 60_000;
     let clock_freq_hz = embassy_rp::clocks::clk_sys_freq();
     let divider = 16u8;
@@ -494,7 +494,8 @@ async fn cv_loop(
 
     // LED PWM setup
     let mut led_pwm_config = pwm::Config::default();
-    led_pwm_config.top = 20470; // 11 bit PWM * 10
+    // 11 bit PWM * 10. 10x is to increase PWM rate, reducing visible flicker.
+    led_pwm_config.top = 20470;
 
     let pwm6 = pwm::Pwm::new_output_ab(led_pwm_slice, led3_pin, led4_pin, led_pwm_config.clone());
     let (Some(mut led3), Some(mut led4)) = pwm6.split() else {

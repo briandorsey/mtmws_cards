@@ -28,6 +28,10 @@ from Rust. Also, I'm new to both the Computer hardware and using Embassy for
 embedded Rust, I expect there are many possible improvements and welcome any
 recommendations.
 
+Note: This card is sampling all inputs in a main loop. Currently the loop is
+running about 275 times a second which is great for CV, but far too slow for
+audio. Don't try to work from this code base to process audio signals.
+
 ## Releasing
 
 TOOD: details of using elf2uf2-rs
