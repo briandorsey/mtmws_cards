@@ -26,7 +26,6 @@ use wscomp::{InputValue, JackValue};
 // inputs seem to be numbers from 0..4096 (12 bit), sometimes inverted from the thing they represent.
 // outputs seem to be numbers from 0..2048 (11 bit), sometimes inverted from the thing they represent.
 
-// TODO: extract into pulse update logic into a task
 // future features, maybe
 // TODO: implement pulse input mixing/logic?
 // TODO: move more data strctures and logic into shared wscomp library
@@ -119,15 +118,9 @@ impl AudioState {
 async fn main(spawner: Spawner) {
     info!("Starting main()");
     let p = embassy_rp::init(Default::default());
-    let mut led5 = Output::new(p.PIN_14, Level::Low);
-    let mut led6 = Output::new(p.PIN_15, Level::Low);
 
     // Normalization probe
     let mut probe = Output::new(p.PIN_4, Level::Low);
-
-    // pulse outputs are inverted
-    let mut pulse_1_raw_out = Output::new(p.PIN_8, Level::High);
-    let mut pulse_2_raw_out = Output::new(p.PIN_9, Level::High);
 
     // Set mux to read switch Z
     let mut muxlogic_a = Output::new(p.PIN_24, Level::Low);
@@ -164,13 +157,17 @@ async fn main(spawner: Spawner) {
             p.PIN_22,
         ))
         .unwrap();
+    spawner
+        .spawn(pulse_loop(p.PIN_14, p.PIN_15, p.PIN_8, p.PIN_9))
+        .unwrap();
     spawner.spawn(periodic_stats()).unwrap();
 
     let mut mux_state = MuxState::default();
     let mux_snd = MUX_INPUT.sender();
     let mut audio_state = AudioState::default();
     let audio_snd = AUDIO_INPUT.sender();
-    let mux_settle_micros = 1;
+    let mux_settle_micros = 20;
+    let probe_settle_micros = 200;
 
     // read from physical knobs, inputs and switch, write to `mux_state`
     loop {
@@ -233,7 +230,7 @@ async fn main(spawner: Spawner) {
             Err(e) => error!("ADC read failed, while reading CV1: {}", e),
         };
         probe.set_high();
-        Timer::after_micros(mux_settle_micros).await;
+        Timer::after_micros(probe_settle_micros).await;
         match adc_device.read(&mut mux_io_2).await {
             Ok(level) => {
                 mux_state.cv1.probe.update(level);
@@ -242,6 +239,7 @@ async fn main(spawner: Spawner) {
             Err(e) => error!("ADC read failed, while reading CV1: {}", e),
         };
         probe.set_low();
+        Timer::after_micros(probe_settle_micros).await;
 
         // read X knob & cv2
         // NOTE: X and Y appear to be swapped compared to how I read the logic table
@@ -268,7 +266,7 @@ async fn main(spawner: Spawner) {
             Err(e) => error!("ADC read failed, while reading CV2: {}", e),
         };
         probe.set_high();
-        Timer::after_micros(mux_settle_micros).await;
+        Timer::after_micros(probe_settle_micros).await;
         match adc_device.read(&mut mux_io_2).await {
             Ok(level) => {
                 mux_state.cv2.probe.update(level);
@@ -277,6 +275,7 @@ async fn main(spawner: Spawner) {
             Err(e) => error!("ADC read failed, while reading CV2: {}", e),
         };
         probe.set_low();
+        Timer::after_micros(probe_settle_micros).await;
 
         // read Y knob
         muxlogic_a.set_low();
@@ -313,23 +312,8 @@ async fn main(spawner: Spawner) {
         mux_snd.send(mux_state.clone());
         audio_snd.send(audio_state.clone());
 
-        // update pulses
-        match mux_state.zswitch {
-            ZSwitch::On | ZSwitch::Momentary => {
-                led5.set_high();
-                pulse_1_raw_out.set_low();
-                led6.set_low();
-                pulse_2_raw_out.set_high();
-            }
-            ZSwitch::Off => {
-                led5.set_low();
-                pulse_1_raw_out.set_high();
-                led6.set_high();
-                pulse_2_raw_out.set_low();
-            }
-        }
-
         // Timer::after_millis(20).await;
+        Timer::after_millis(1).await;
         yield_now().await;
     }
 }
@@ -560,6 +544,44 @@ async fn cv_loop(
                         led_gamma(y_value.to_output())
                     )
                 });
+        }
+        Timer::after_millis(20).await;
+    }
+}
+
+#[embassy_executor::task]
+async fn pulse_loop(
+    led5_pin: peripherals::PIN_14,
+    led6_pin: peripherals::PIN_15,
+    pulse1_pin: peripherals::PIN_8,
+    pulse2_pin: peripherals::PIN_9,
+) {
+    let mut led5 = Output::new(led5_pin, Level::Low);
+    let mut led6 = Output::new(led6_pin, Level::Low);
+
+    // pulse outputs are inverted
+    let mut pulse_1_raw_out = Output::new(pulse1_pin, Level::High);
+    let mut pulse_2_raw_out = Output::new(pulse2_pin, Level::High);
+
+    let mut mux_rcv = MUX_INPUT.anon_receiver();
+
+    loop {
+        if let Some(mux_state) = mux_rcv.try_get() {
+            // update pulses
+            match mux_state.zswitch {
+                ZSwitch::On | ZSwitch::Momentary => {
+                    led5.set_high();
+                    pulse_1_raw_out.set_low();
+                    led6.set_low();
+                    pulse_2_raw_out.set_high();
+                }
+                ZSwitch::Off => {
+                    led5.set_low();
+                    pulse_1_raw_out.set_high();
+                    led6.set_high();
+                    pulse_2_raw_out.set_low();
+                }
+            }
         }
         Timer::after_millis(20).await;
     }
