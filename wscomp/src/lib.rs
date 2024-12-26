@@ -62,7 +62,7 @@ impl InputValue {
         let mut value = i32::from(value);
         value -= Self::OFFSET;
         if self.inverted_source {
-            value -= value;
+            value = -value;
         }
         // first-order infinite impulse response filter, logic from:
         // https://electronics.stackexchange.com/a/176740
