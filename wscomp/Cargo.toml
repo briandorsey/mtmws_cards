@@ -5,4 +5,3 @@ edition = "2021"
 
 [dependencies]
 defmt = "0.3"
-derive_more = { version = "1", default-features = false, features = ["add", "mul", "deref", "as_ref"] }

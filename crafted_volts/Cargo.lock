@@ -160,6 +160,7 @@ dependencies = [
  "defmt-rtt",
  "embassy-embedded-hal",
  "embassy-executor",
+ "embassy-futures 0.1.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "embassy-rp",
  "embassy-sync 0.6.1 (registry+https://github.com/rust-lang/crates.io-index)",
  "embassy-time",
@@ -273,26 +274,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "derive_more"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "4a9b99b9cbbe49445b21764dc0625032a89b145a2642e67603e1c936f5458d05"
-dependencies = [
- "derive_more-impl",
-]
-
-[[package]]
-name = "derive_more-impl"
-version = "1.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "cb7330aeadfbe296029522e6c40f315320aba36fc43a5b3632f3795348f3bd22"
-dependencies = [
- "proc-macro2",
- "quote",
- "syn 2.0.90",
-]
-
-[[package]]
 name = "diff"
 version = "0.1.13"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -339,7 +320,7 @@ name = "embassy-embedded-hal"
 version = "0.2.0"
 dependencies = [
  "defmt",
- "embassy-futures",
+ "embassy-futures 0.1.1",
  "embassy-sync 0.6.1",
  "embassy-time",
  "embedded-hal 0.2.7",
@@ -378,6 +359,12 @@ name = "embassy-futures"
 version = "0.1.1"
 
 [[package]]
+name = "embassy-futures"
+version = "0.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1f878075b9794c1e4ac788c95b728f26aa6366d32eeb10c7051389f898f7d067"
+
+[[package]]
 name = "embassy-hal-internal"
 version = "0.2.0"
 dependencies = [
@@ -399,7 +386,7 @@ dependencies = [
  "defmt",
  "document-features",
  "embassy-embedded-hal",
- "embassy-futures",
+ "embassy-futures 0.1.1",
  "embassy-hal-internal",
  "embassy-sync 0.6.1",
  "embassy-time",
@@ -1479,5 +1466,4 @@ name = "wscomp"
 version = "0.1.0"
 dependencies = [
  "defmt",
- "derive_more",
 ]
