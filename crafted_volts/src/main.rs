@@ -143,6 +143,7 @@ async fn main(spawner: Spawner) {
     let mut audio1 = adc::Channel::new_pin(p.PIN_27, gpio::Pull::None);
     let mut audio2 = adc::Channel::new_pin(p.PIN_26, gpio::Pull::None);
 
+    // if we can't spawn tasks, panic is the only option? Thus unwrap() OK here.
     spawner
         .spawn(audio_loop(
             p.PWM_SLICE5,
@@ -424,7 +425,8 @@ async fn audio_loop(
             //     mux_state.main_knob, output_value, dac_buffer[0], dac_buffer[1]
             // );
             cs.set_low();
-            spi.blocking_write(&dac_buffer).unwrap();
+            spi.blocking_write(&dac_buffer)
+                .unwrap_or_else(|e| error!("error writing to DAC: {}", e));
             cs.set_high();
 
             dac_buffer = ((output_value.to_output() << 4 >> 4) | dac_config_b).to_be_bytes();
@@ -433,7 +435,8 @@ async fn audio_loop(
             //     mux_state.main_knob, output_value, dac_buffer[0], dac_buffer[1]
             // );
             cs.set_low();
-            spi.blocking_write(&dac_buffer).unwrap();
+            spi.blocking_write(&dac_buffer)
+                .unwrap_or_else(|e| error!("error writing to DAC: {}", e));
             cs.set_high();
 
             // audio LEDs
