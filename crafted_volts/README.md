@@ -4,7 +4,7 @@
 
 A utility card for the WS Computer to manually set control voltages (CV)
 with the input knobs and switch. It also attenuverts (attenuates and inverts)
-incomming voltages.
+incoming voltages.
 
 ```text
 Audio output 1: Main knob position mapped to voltage, about -6v to +6v
