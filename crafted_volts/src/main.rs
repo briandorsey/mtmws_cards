@@ -26,7 +26,6 @@ use wscomp::{InputValue, JackValue};
 // inputs seem to be numbers from 0..4096 (12 bit), sometimes inverted from the thing they represent.
 // outputs seem to be numbers from 0..2048 (11 bit), sometimes inverted from the thing they represent.
 
-// TODO: when attenuverting, LEDs should reflect output voltage, not knob
 // TODO: implement LED brightness scaling (gamma correction)
 // TODO: decide how to handle all unwraps properly
 // TODO: review pwm frequencies
@@ -403,28 +402,6 @@ async fn audio_loop(
 
     loop {
         if let (Some(mux_state), Some(audio_state)) = (mux_rcv.try_get(), audio_rcv.try_get()) {
-            // audio LEDs
-            led1.set_duty_cycle_fraction(
-                scale_led_brightness(mux_state.main_knob.to_output()),
-                2047,
-            )
-            .unwrap_or_else(|_| {
-                error!(
-                    "error setting LED 1 PWM to : {}",
-                    scale_led_brightness(mux_state.main_knob.to_output())
-                )
-            });
-            led2.set_duty_cycle_fraction(
-                scale_led_brightness(mux_state.main_knob.to_output_inverted()),
-                2047,
-            )
-            .unwrap_or_else(|_| {
-                error!(
-                    "error setting LED 2 PWM to : {}",
-                    scale_led_brightness(mux_state.main_knob.to_output_inverted())
-                )
-            });
-
             // write to audio outputs
             let mut output_value = mux_state.main_knob;
             // If cable plugged into audio inputs, mix then attenuvert that signal
@@ -462,6 +439,25 @@ async fn audio_loop(
             cs.set_low();
             spi.blocking_write(&dac_buffer).unwrap();
             cs.set_high();
+
+            // audio LEDs
+            led1.set_duty_cycle_fraction(scale_led_brightness(output_value.to_output()), 2047)
+                .unwrap_or_else(|_| {
+                    error!(
+                        "error setting LED 1 PWM to : {}",
+                        scale_led_brightness(output_value.to_output())
+                    )
+                });
+            led2.set_duty_cycle_fraction(
+                scale_led_brightness(output_value.to_output_inverted()),
+                2047,
+            )
+            .unwrap_or_else(|_| {
+                error!(
+                    "error setting LED 2 PWM to : {}",
+                    scale_led_brightness(output_value.to_output_inverted())
+                )
+            });
         }
         Timer::after_millis(20).await;
     }
@@ -513,23 +509,6 @@ async fn cv_loop(
 
     loop {
         if let Some(mux_state) = mux_rcv.try_get() {
-            // info!("X value: {:?}", mux_state.x_knob);
-
-            led3.set_duty_cycle_fraction(scale_led_brightness(mux_state.x_knob.to_output()), 2047)
-                .unwrap_or_else(|_| {
-                    error!(
-                        "error setting LED 3 PWM to : {}",
-                        scale_led_brightness(mux_state.x_knob.to_output())
-                    )
-                });
-            led4.set_duty_cycle_fraction(scale_led_brightness(mux_state.y_knob.to_output()), 2047)
-                .unwrap_or_else(|_| {
-                    error!(
-                        "error setting LED 4 PWM to : {}",
-                        scale_led_brightness(mux_state.y_knob.to_output())
-                    )
-                });
-
             // cv1 output
             let mut x_value = mux_state.x_knob;
             // If cable plugged into cv1, attenuvert that signal
@@ -566,6 +545,22 @@ async fn cv_loop(
                     error!(
                         "error setting CV2 PWM to : {}",
                         y_value.to_output_inverted()
+                    )
+                });
+
+            // LEDs
+            led3.set_duty_cycle_fraction(scale_led_brightness(x_value.to_output()), 2047)
+                .unwrap_or_else(|_| {
+                    error!(
+                        "error setting LED 3 PWM to : {}",
+                        scale_led_brightness(x_value.to_output())
+                    )
+                });
+            led4.set_duty_cycle_fraction(scale_led_brightness(y_value.to_output()), 2047)
+                .unwrap_or_else(|_| {
+                    error!(
+                        "error setting LED 4 PWM to : {}",
+                        scale_led_brightness(y_value.to_output())
                     )
                 });
         }
