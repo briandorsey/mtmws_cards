@@ -9,9 +9,11 @@ use defmt::*;
 ///
 /// Normalized to the range -2048 to 2047 inclusive. Stored as i32 to give
 /// room for integer math without needing allocations and the rp2040 is 32bit.
-/// Conversions from/to this type saturate (clamp) - they stop at the min/max
-/// values without giving errors. Before converting, raw internal value may be
+/// Conversions from this type saturate (clamp) - they stop at the min/max
+/// values without giving errors. Before converting, raw internal value will be
 /// outside of 12 bit range (allowing for math & accumulations, etc).
+///
+/// Values are smoothed over recent updates (count based on `ACCUM_BITS`).
 #[derive(Format, PartialEq, Copy, Clone)]
 pub struct InputValue {
     accumulated_raw: i32,
@@ -37,6 +39,7 @@ impl InputValue {
     pub const OFFSET: i32 = 2_i32.pow(11);
     const ACCUM_BITS: u8 = 4;
 
+    // New `InputValue` from i32
     pub fn new(raw_value: i32, invert: bool) -> Self {
         InputValue {
             accumulated_raw: match invert {
@@ -47,21 +50,24 @@ impl InputValue {
         }
     }
 
-    /// Convert from u16 and offset value so center is at zero
+    /// New `InputValue` from u16 and offset value so center is at zero
     pub fn from_u16(value: u16, invert: bool) -> Self {
         let mut output = i32::from(value);
         output -= Self::OFFSET;
         Self::new(output, invert)
     }
 
+    /// Update with new value
     pub fn update(&mut self, value: u16) {
         let mut value = i32::from(value);
         value -= Self::OFFSET;
         if self.inverted_source {
             value -= value;
         }
-        // TODO: actually smooth values here
-        self.accumulated_raw = value << Self::ACCUM_BITS;
+        // first-order infinite impulse response filter, logic from:
+        // https://electronics.stackexchange.com/a/176740
+        self.accumulated_raw =
+            (self.accumulated_raw - (self.accumulated_raw >> Self::ACCUM_BITS)) + value;
     }
 
     /// Saturating conversion into 11 bit safe u16 for output

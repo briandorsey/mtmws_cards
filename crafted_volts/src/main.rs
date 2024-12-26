@@ -177,8 +177,8 @@ async fn main(spawner: Spawner) {
 
         match mux_adc.read(&mut mux_io_1).await {
             Ok(level) => {
-                // info!("M knob: MUX_IO_1 ADC: {}", level);
                 mux_state.main_knob.update(level);
+                // info!("M knob: {}, {}", level, mux_state.main_knob.to_output());
             }
             Err(e) => error!("ADC read failed, while reading Main: {}", e),
         };
@@ -188,6 +188,7 @@ async fn main(spawner: Spawner) {
             Ok(level) => {
                 // info!("CV1: MUX_IO_2 ADC: {}", level);
                 mux_state.cv1.update(level);
+                // info!("cv1: {}, {}", level, mux_state.cv1.to_output());
             }
             Err(e) => error!("ADC read failed, while reading CV1: {}", e),
         };
@@ -202,8 +203,8 @@ async fn main(spawner: Spawner) {
 
         match mux_adc.read(&mut mux_io_1).await {
             Ok(level) => {
-                // info!("X knob: MUX_IO_1 ADC: {}", level);
                 mux_state.x_knob.update(level);
+                // info!("x knob: {}, {}", level, mux_state.x_knob.to_output());
             }
             Err(e) => error!("ADC read failed, while reading X: {}", e),
         };
@@ -211,8 +212,8 @@ async fn main(spawner: Spawner) {
         // read cv2 (inverted data)
         match mux_adc.read(&mut mux_io_2).await {
             Ok(level) => {
-                // info!("CV2: MUX_IO_2 ADC: {}", level);
                 mux_state.cv2.update(level);
+                // info!("cv2: {}, {}", level, mux_state.cv2.to_output());
             }
             Err(e) => error!("ADC read failed, while reading CV2: {}", e),
         };
@@ -225,8 +226,8 @@ async fn main(spawner: Spawner) {
 
         match mux_adc.read(&mut mux_io_1).await {
             Ok(level) => {
-                // info!("Y knob: MUX_IO_1 ADC: {}", level);
                 mux_state.y_knob.update(level);
+                // info!("y knob: {}, {}", level, mux_state.y_knob.to_output());
             }
             Err(e) => error!("ADC read failed, while reading Y: {}", e),
         };
@@ -268,7 +269,7 @@ async fn main(spawner: Spawner) {
             }
         }
 
-        // Timer::after_nanos(1).await;
+        // Timer::after_millis(10).await;
         yield_now().await;
     }
 }
