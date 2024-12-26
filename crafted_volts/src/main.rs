@@ -18,7 +18,7 @@ use embassy_time::Timer;
 use gpio::{Level, Output};
 use {defmt_rtt as _, panic_probe as _};
 
-use wscomp::InputValue;
+use wscomp::{InputValue, JackValue};
 
 // This is an attempt to learn how use all inputs & outputs of the Music Thing Modular Workshop System Computer via Rust & Embassy.
 // The card maps knobs and the switch to manually set voltages.
@@ -26,9 +26,7 @@ use wscomp::InputValue;
 // inputs seem to be numbers from 0..4096 (12 bit), sometimes inverted from the thing they represent.
 // outputs seem to be numbers from 0..2048 (11 bit), sometimes inverted from the thing they represent.
 
-// TODO: use normalization probe to only mix when inputs are plugged (needed for attenuation math)
 // TODO: implement audio input mixing / attenuation?
-// TODO: implement CV input mixing / attenuation?
 // TODO: implement LED brightness scaling (gamma correction)
 // TODO: decide how to handle all unwraps properly
 // TODO: review pwm frequencies
@@ -72,8 +70,8 @@ struct MuxState {
     x_knob: InputValue,
     y_knob: InputValue,
     zswitch: ZSwitch,
-    cv1: InputValue,
-    cv2: InputValue,
+    cv1: JackValue,
+    cv2: JackValue,
     sequence_counter: usize,
 }
 
@@ -86,8 +84,14 @@ impl MuxState {
             zswitch: ZSwitch::default(),
             // CV inputs are not inverted according to docs.  0V reads ~ 2030
             // NOTE: I get inverted data, and ~2060 as 0v
-            cv1: InputValue::new(InputValue::CENTER, true),
-            cv2: InputValue::new(InputValue::CENTER, true),
+            cv1: JackValue::new(
+                InputValue::new(InputValue::CENTER, true),
+                InputValue::new(InputValue::CENTER, true),
+            ),
+            cv2: JackValue::new(
+                InputValue::new(InputValue::CENTER, true),
+                InputValue::new(InputValue::CENTER, true),
+            ),
             sequence_counter: 0,
         }
     }
@@ -101,7 +105,7 @@ async fn main(spawner: Spawner) {
     let mut led6 = Output::new(p.PIN_15, Level::Low);
 
     // Normalization probe
-    let mut _probe = Output::new(p.PIN_4, Level::Low);
+    let mut probe = Output::new(p.PIN_4, Level::Low);
 
     // pulse outputs are inverted
     let mut pulse_1_raw_out = Output::new(p.PIN_8, Level::High);
@@ -147,27 +151,6 @@ async fn main(spawner: Spawner) {
     loop {
         mux_state.sequence_counter = mux_state.sequence_counter.wrapping_add(1);
 
-        // every X loops, check input jacks for plugged in cables
-        // if mux_state.sequence_counter % 8 == 0 {
-        //     match check_normalization(
-        //         &mut mux_state,
-        //         &mut muxlogic_a,
-        //         &mut muxlogic_b,
-        //         &mut mux_adc,
-        //         &mut mux_io_2,
-        //         &mut probe,
-        //     )
-        //     .await
-        //     {
-        //         Ok(()) => {}
-        //         Err(e) => error!(
-        //             "ADC read failed, while reading normalization probe values: {}",
-        //             e
-        //         ),
-        //     }
-        // }
-
-        // ---- begin default read section
         // read Main knob & cv1
         muxlogic_a.set_low();
         muxlogic_b.set_low();
@@ -185,12 +168,21 @@ async fn main(spawner: Spawner) {
         // read cv1 (inverted data)
         match mux_adc.read(&mut mux_io_2).await {
             Ok(level) => {
-                // info!("CV1: MUX_IO_2 ADC: {}", level);
-                mux_state.cv1.update(level);
+                mux_state.cv1.raw.update(level);
                 // info!("cv1: {}, {}", level, mux_state.cv1.to_output());
             }
             Err(e) => error!("ADC read failed, while reading CV1: {}", e),
         };
+        probe.set_high();
+        Timer::after_micros(mux_settle_micros).await;
+        match mux_adc.read(&mut mux_io_2).await {
+            Ok(level) => {
+                mux_state.cv1.probe.update(level);
+                // info!("cv1: {}, {}", level, mux_state.cv1.to_output());
+            }
+            Err(e) => error!("ADC read failed, while reading CV1: {}", e),
+        };
+        probe.set_low();
 
         // read X knob & cv2
         // NOTE: X and Y appear to be swapped compared to how I read the logic table
@@ -211,11 +203,21 @@ async fn main(spawner: Spawner) {
         // read cv2 (inverted data)
         match mux_adc.read(&mut mux_io_2).await {
             Ok(level) => {
-                mux_state.cv2.update(level);
-                // info!("cv2: {}, {}", level, mux_state.cv2.to_output());
+                mux_state.cv2.raw.update(level);
+                // info!("cv2: {}, {}", level, mux_state.cv2.raw.to_output());
             }
             Err(e) => error!("ADC read failed, while reading CV2: {}", e),
         };
+        probe.set_high();
+        Timer::after_micros(mux_settle_micros).await;
+        match mux_adc.read(&mut mux_io_2).await {
+            Ok(level) => {
+                mux_state.cv2.probe.update(level);
+                // info!("cv2: {}, {}", level, mux_state.cv2.raw.to_output());
+            }
+            Err(e) => error!("ADC read failed, while reading CV2: {}", e),
+        };
+        probe.set_low();
 
         // read Y knob
         muxlogic_a.set_low();
@@ -268,40 +270,9 @@ async fn main(spawner: Spawner) {
             }
         }
 
-        // Timer::after_millis(10).await;
+        // Timer::after_millis(20).await;
         yield_now().await;
     }
-}
-
-async fn _check_normalization<'a, M: adc::Mode>(
-    _mux_state: &mut MuxState,
-    muxlogic_a: &mut Output<'a>,
-    muxlogic_b: &mut Output<'a>,
-    mux_adc: &mut adc::Adc<'a, M>,
-    mux_io_2: &mut adc::Channel<'a>,
-    probe: &mut Output<'a>,
-) -> Result<(), adc::Error> {
-    muxlogic_a.set_low();
-    muxlogic_b.set_low();
-    let _level_raw = mux_adc.blocking_read(mux_io_2)?;
-    // let _level_raw = InputValue::from_u16_inverted(level_raw);
-    probe.set_high();
-    Timer::after_micros(1).await;
-    let _level_norm = mux_adc.blocking_read(mux_io_2)?;
-    // let _level_norm = InputValue::from_u16_inverted(level_norm);
-
-    // info!(
-    //     "probe before {}, after: {}, diff: {}",
-    //     level_raw,
-    //     level_norm,
-    //     level_raw - level_norm
-    // );
-
-    // cleanup
-    probe.set_low();
-    muxlogic_a.set_low();
-    muxlogic_b.set_low();
-    Ok(())
 }
 
 // TODO: improve LED scaling.
@@ -485,27 +456,36 @@ async fn cv_loop(
                     )
                 });
 
-            // set CV PWM
-            // info!(
-            //     "{}, {}, {}",
-            //     mux_state.x_knob,
-            //     x_output,
-            //     2047_u16.saturating_sub(x_output)
-            // );
+            // cv1 output
+            let mut x_value = mux_state.x_knob;
+            // If cable plugged into cv1, attenuvert that signal
+            if let Some(input_cv) = mux_state.cv1.plugged_value() {
+                // info!("x: {}, cv: {}", x_value, input_cv);
+                x_value = (*input_cv * x_value) / InputValue::OFFSET;
+            }
             cv1_pwm
-                .set_duty_cycle_fraction(mux_state.x_knob.to_output_inverted(), 2047)
+                .set_duty_cycle_fraction(x_value.to_output_inverted(), 2047)
                 .unwrap_or_else(|_| {
                     error!(
                         "error setting CV1 PWM to : {}",
-                        mux_state.x_knob.to_output_inverted()
+                        x_value.to_output_inverted()
                     )
                 });
 
-            // prototype attenuverting logic
-            let y_value = mux_state.y_knob;
-            // if let Some(input_cv) = mux_state.cv2 {
-            //     y_value = y_value * input_cv / InputValue::OFFSET;
-            // }
+            // cv2 output
+            let mut y_value = mux_state.y_knob;
+            // info!(
+            //     "y: {}, cv: {}, probe: {}, diff: {}",
+            //     y_value.to_output(),
+            //     mux_state.cv2.raw.to_output(),
+            //     mux_state.cv2.probe.to_output(),
+            //     mux_state.cv2.probe.to_clamped() - mux_state.cv2.raw.to_clamped()
+            // );
+            // If cable plugged into cv2, attenuvert that signal
+            if let Some(input_cv) = mux_state.cv2.plugged_value() {
+                // info!("y: {}, cv: {}", y_value, input_cv);
+                y_value = (*input_cv * y_value) / InputValue::OFFSET;
+            }
             cv2_pwm
                 .set_duty_cycle_fraction(y_value.to_output_inverted(), 2047)
                 .unwrap_or_else(|_| {

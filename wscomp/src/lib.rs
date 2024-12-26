@@ -126,6 +126,44 @@ impl Div<i32> for InputValue {
     }
 }
 
+/// `JackValue` represents input values from a jack when a cable is plugged.
+///
+/// This struct expects both `raw` and `probe` values to be updated regularly.
+/// When a value is requested, it only returns a value when a cable is
+/// connected.
+///
+/// When the Computer module's normalization probe is enabled, all jacks
+/// recieve a fixed voltage only when nothing is plugged into them. The voltage
+/// difference between no cable and the probe should be a consistent value
+/// significantly above zero. When a cable is plugged in there should be no
+/// difference when the probe is enabled. The logic relies on both values to
+/// be smoothed to avoid false negatives from short term voltages on the cable
+/// which happen to have the right voltage difference between them from a single
+/// sample.
+#[derive(Format, Clone)]
+pub struct JackValue {
+    pub raw: InputValue,
+    pub probe: InputValue,
+}
+
+// TODO: implement probe logic
+impl JackValue {
+    pub fn new(raw: InputValue, probe: InputValue) -> JackValue {
+        JackValue { raw, probe }
+    }
+
+    pub fn plugged_value(&self) -> Option<&InputValue> {
+        let mut diff = self.probe.accumulated_raw - self.raw.accumulated_raw;
+        diff >>= InputValue::ACCUM_BITS;
+        // determined through testing my unit, may need adjusting
+        if diff > 300 {
+            None
+        } else {
+            Some(&self.raw)
+        }
+    }
+}
+
 #[cfg(test)]
 mod test {
     // Note this useful idiom: importing names from outer (for mod tests) scope.
@@ -166,6 +204,11 @@ mod test {
 
     #[test]
     fn test_input_value_to_output() {
+        assert_eq!(
+            InputValue::new(InputValue::CENTER, false).to_output(),
+            1024_u16
+        );
+
         // output values are half of input (11 bit from 12 bit)
         assert_eq!(InputValue::from_u16(0, false).to_output(), 0);
         assert_eq!(InputValue::from_u16(2_u16, false).to_output(), 1_u16);
@@ -179,6 +222,28 @@ mod test {
 
         let below_range = InputValue::from_u16(0, false) - InputValue::new(5000, false);
         assert_eq!(below_range.to_output(), 0_u16);
+    }
+
+    #[test]
+    fn test_input_value_inverted_to_output() {
+        assert_eq!(
+            InputValue::new(InputValue::CENTER, true).to_output(),
+            1024_u16
+        );
+
+        // output values are half of input (11 bit from 12 bit)
+        assert_eq!(InputValue::from_u16(0, true).to_output(), 2047);
+        // assert_eq!(InputValue::from_u16(2_u16, true).to_output(), 2046_u16);
+        assert_eq!(InputValue::from_u16(1024_u16, true).to_output(), 1536_u16);
+        assert_eq!(InputValue::from_u16(2047_u16, true).to_output(), 1024_u16);
+
+        // clamp to 11 bit values in to_output() when inputs are above range
+        assert_eq!(InputValue::from_u16(8000, true).to_output(), 0_u16);
+        assert_eq!(InputValue::from_u16(5000, true).to_output(), 0_u16);
+        assert_eq!(InputValue::from_u16(4096, true).to_output(), 0_u16);
+
+        let below_range = InputValue::from_u16(0, true) - InputValue::new(5000, true);
+        assert_eq!(below_range.to_output(), 2047_u16);
     }
 
     #[test]
