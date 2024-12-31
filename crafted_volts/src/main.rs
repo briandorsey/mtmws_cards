@@ -225,7 +225,7 @@ async fn main(spawner: Spawner) {
         match adc_device.read(&mut mux_io_2).await {
             Ok(level) => {
                 mux_state.cv1.raw.update(level);
-                // info!("cv1: {}, {}", level, mux_state.cv1.to_output());
+                // info!("cv1: {}, {}", level, mux_state.cv1.raw.to_output());
             }
             Err(e) => error!("ADC read failed, while reading CV1: {}", e),
         };
@@ -234,7 +234,7 @@ async fn main(spawner: Spawner) {
         match adc_device.read(&mut mux_io_2).await {
             Ok(level) => {
                 mux_state.cv1.probe.update(level);
-                // info!("cv1: {}, {}", level, mux_state.cv1.to_output());
+                // info!("cv1: {}, {}", level, mux_state.cv1.probe.to_output());
             }
             Err(e) => error!("ADC read failed, while reading CV1: {}", e),
         };
@@ -270,7 +270,7 @@ async fn main(spawner: Spawner) {
         match adc_device.read(&mut mux_io_2).await {
             Ok(level) => {
                 mux_state.cv2.probe.update(level);
-                // info!("cv2: {}, {}", level, mux_state.cv2.raw.to_output());
+                // info!("cv2: {}, {}", level, mux_state.cv2.probe.to_output());
             }
             Err(e) => error!("ADC read failed, while reading CV2: {}", e),
         };
@@ -492,6 +492,7 @@ async fn cv_loop(
         if let Some(mux_state) = mux_rcv.try_get() {
             // cv1 output
             let mut x_value = mux_state.x_knob;
+            // info!("x: {}", x_value);
             // If cable plugged into cv1, attenuvert that signal
             if let Some(input_cv) = mux_state.cv1.plugged_value() {
                 // info!("x: {}, cv: {}", x_value, input_cv);
