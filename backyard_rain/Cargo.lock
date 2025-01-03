@@ -36,6 +36,12 @@ dependencies = [
 ]
 
 [[package]]
+name = "audio-codec-algorithms"
+version = "0.6.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "94af03e51bad74c7645ee2560cd67c7ab9a137308131ee5d6076a34de81cdcd7"
+
+[[package]]
 name = "autocfg"
 version = "1.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -51,6 +57,7 @@ checksum = "7b7e4c2464d97fe331d41de9d5db0def0a96f4d823b8b32a2efd503578988973"
 name = "backyard_rain"
 version = "0.1.0"
 dependencies = [
+ "audio-codec-algorithms",
  "cortex-m",
  "cortex-m-rt",
  "critical-section",

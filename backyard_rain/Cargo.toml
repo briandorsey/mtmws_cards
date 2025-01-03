@@ -31,6 +31,7 @@ embassy-sync = { version = "0.6.1", features = ["defmt"] }
 embassy-executor = { version = "0.6.3", path = "../../embassy/embassy-executor", features = ["defmt", "task-arena-size-98304", "arch-cortex-m", "executor-thread", "executor-interrupt", "integrated-timers"] }
 embassy-futures = "0.1.1"
 static_cell = "2.1.0"
+audio-codec-algorithms = "0.6.0"
 
 [[bin]]
 name = "backyard_rain"

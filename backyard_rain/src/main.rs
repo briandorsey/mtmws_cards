@@ -1,6 +1,8 @@
 #![no_std]
 #![no_main]
 
+use core::num::ParseIntError;
+
 use cortex_m_rt::entry;
 use defmt::*;
 
@@ -20,6 +22,7 @@ use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
 use embassy_sync::watch::Watch;
 use embassy_time::{Duration, Instant, Ticker, Timer};
 
+use audio_codec_algorithms::decode_adpcm_ima_ms;
 use gpio::{Level, Output};
 use portable_atomic::{AtomicU32, Ordering};
 use static_cell::StaticCell;
@@ -93,7 +96,7 @@ impl MuxState {
 }
 
 static EXECUTOR1: StaticCell<Executor> = StaticCell::new();
-static mut CORE1_STACK: Stack<4096> = Stack::new();
+static mut CORE1_STACK: Stack<{ 1024 * 16 }> = Stack::new();
 // static EXECUTOR_HIGH: InterruptExecutor = InterruptExecutor::new();
 static EXECUTOR_DEFAULT: StaticCell<Executor> = StaticCell::new();
 
@@ -324,8 +327,12 @@ async fn periodic_stats() {
 }
 
 // ==== ==== CORE1 data and processing ==== ====
-// const AUDIO_MEDIUM: &[u8; 1757094] = include_bytes!("../data/backyard_thunder_01.wav");
-const AUDIO_MEDIUM: &[u8; 48044] = include_bytes!("../data/sine_48_220.wav");
+// const AUDIO_HEAVY: &[u8; 48044] = include_bytes!("../data/sine_48_440.wav");
+// const AUDIO_MEDIUM: &[u8; 12432] = include_bytes!("../data/sine_medium.wav");
+// const AUDIO_LIGHT: &[u8; 12432] = include_bytes!("../data/sine_light.wav");
+
+const AUDIO_MEDIUM: &[u8; 123024] = include_bytes!("../data/sine_long.wav");
+// const AUDIO_MEDIUM: &[u8; 441488] = include_bytes!("../data/backyard_thunder_01.wav");
 
 /// Audio processing loop
 ///
@@ -340,12 +347,13 @@ async fn audio_loop(
     pulse1_pin: peripherals::PIN_8, // maybe temp, for measuring sample rate
     pulse2_pin: peripherals::PIN_9,
 ) {
+    info!("Starting audio_loop()");
     let mut local_counter = 0u32;
     let mut local_max_ticks = 0u32;
     let mut previous_loop_end = Instant::now();
 
     let mut pulse1 = Output::new(pulse1_pin, Level::High);
-    let mut _pulse2 = Output::new(pulse2_pin, Level::High);
+    let mut pulse2 = Output::new(pulse2_pin, Level::High);
 
     let mut config = spi::Config::default();
     config.frequency = 8_000_000;
@@ -364,12 +372,17 @@ async fn audio_loop(
     let mut dac_buffer_a: [u8; 2];
     let mut dac_buffer_b: [u8; 2];
 
-    let mut medium_samples = AUDIO_MEDIUM
-        .chunks_exact(2)
-        .skip(22) // weirdly... half the offset of data chunk + 4
+    const BLOCK_SIZE: usize = 1024;
+    // IMA ADPCM files are 4 bits per sample, grab data a byte at a time
+    let mut medium_samples = AUDIO_MEDIUM[136 + 8..]
+        // TODO: hardcoded for now...
+        .chunks_exact(BLOCK_SIZE)
         .cycle()
-        // can switch back to passing the slice w/o closure?
-        .map(|data| i16::from_le_bytes([data[0], data[1]]));
+        .flat_map(|data| {
+            let mut adpcm_output_buffer = [0_i16; 2 * BLOCK_SIZE - 7];
+            decode_adpcm_ima_ms(data, false, &mut adpcm_output_buffer).unwrap();
+            adpcm_output_buffer
+        });
 
     let mut saw_value = 0u16;
 
@@ -380,15 +393,14 @@ async fn audio_loop(
     let mut ticker = Ticker::every(Duration::from_hz(48_000));
     loop {
         pulse1.toggle();
-        // pulse2.set_high();
+        pulse2.set_high();
         local_counter += 1;
 
         if local_counter % 16 == 0 {
             AUDIO_FREQ_COUNTER.store(local_counter, Ordering::Relaxed);
         }
 
-        // 16 bit WAVs are i16
-        let mut sample: i16 = medium_samples
+        let mut sample = medium_samples
             .next()
             .expect("iterator over cycle returned None somehow?!?!");
         // down sample from 16 to 12 bit
@@ -447,7 +459,7 @@ async fn audio_loop(
             local_max_ticks = diff;
         }
 
-        // pulse2.set_low();
+        pulse2.set_low();
         ticker.next().await
     }
 }
