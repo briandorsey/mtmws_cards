@@ -1,13 +1,10 @@
 #![no_std]
 #![no_main]
 
-use core::num::ParseIntError;
-
 use cortex_m_rt::entry;
 use defmt::*;
 
 use embassy_executor::Executor;
-use embassy_executor::Spawner;
 use embassy_rp::bind_interrupts;
 use embassy_rp::clocks;
 use embassy_rp::gpio::{self};
@@ -19,6 +16,7 @@ use embassy_rp::peripherals;
 use embassy_rp::spi;
 use embassy_rp::{adc, Peripheral};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
+use embassy_sync::channel::Channel;
 use embassy_sync::watch::Watch;
 use embassy_time::{Duration, Instant, Ticker, Timer};
 
@@ -46,6 +44,7 @@ bind_interrupts!(struct Irqs {
 // single writer, multple reader
 static MUX_INPUT: Watch<CriticalSectionRawMutex, MuxState, 2> = Watch::new();
 // static AUDIO_INPUT: Watch<CriticalSectionRawMutex, AudioState, 2> = Watch::new();
+static AUDIO_OUT_SAMPLES: Channel<CriticalSectionRawMutex, DACSamplePair, 1024> = Channel::new();
 
 /// The state of the three position Z switch
 #[derive(Clone, Format)]
@@ -107,7 +106,7 @@ static EXECUTOR_DEFAULT: StaticCell<Executor> = StaticCell::new();
 
 #[entry]
 fn main() -> ! {
-    info!("Hello World!");
+    info!("Starting main()");
 
     let p = embassy_rp::init(Default::default());
 
@@ -115,6 +114,8 @@ fn main() -> ! {
     // interrupt::SWI_IRQ_1.set_priority(Priority::P2);
     // let spawner = EXECUTOR_HIGH.start(interrupt::SWI_IRQ_1);
     // unwrap!(spawner.spawn(audio_loop()));
+
+    // if we can't spawn tasks, panic is the only option? Thus unwrap() OK?
 
     spawn_core1(
         // must never use CORE1 outside of this executor
@@ -134,8 +135,10 @@ fn main() -> ! {
     let executor = EXECUTOR_DEFAULT.init(Executor::new());
     executor.run(|spawner| {
         unwrap!(spawner.spawn(input_loop(
-            p.PIN_4, p.PIN_24, p.PIN_25, p.ADC, p.PIN_28, p.PIN_29, spawner
+            p.PIN_4, p.PIN_24, p.PIN_25, p.ADC, p.PIN_28, p.PIN_29,
         )));
+        unwrap!(spawner.spawn(periodic_stats()));
+        unwrap!(spawner.spawn(mixer_loop()));
     })
 }
 
@@ -148,12 +151,8 @@ async fn input_loop(
     p_adc: peripherals::ADC,
     mux_io_1_pin: peripherals::PIN_28,
     mux_io_2_pin: peripherals::PIN_29,
-    spawner: Spawner,
 ) {
     info!("Starting input_loop()");
-
-    // if we can't spawn tasks, panic is the only option? Thus unwrap() OK here.
-    spawner.spawn(periodic_stats()).unwrap();
 
     // Normalization probe
     let mut probe = Output::new(probe_pin, Level::Low);
@@ -326,13 +325,92 @@ async fn periodic_stats() {
     }
 }
 
+/// Raw data ready to send to the DAC
+struct DACSamplePair {
+    pub audio1: u16,
+    pub audio2: u16,
+}
+
+impl DACSamplePair {
+    // DAC config bits
+    // 0: channel select 0 = A, 1 = B
+    // 1: unused
+    // 2: 0 = 2x gain, 1 = 1x
+    // 3: 0 = shutdown channel
+    const CONFIG1: u16 = 0b0001000000000000u16;
+    const CONFIG2: u16 = 0b1001000000000000u16;
+
+    fn new(sample1: u16, sample2: u16) -> Self {
+        Self {
+            audio1: sample1 << 4 >> 4 | DACSamplePair::CONFIG1,
+            audio2: sample2 << 4 >> 4 | DACSamplePair::CONFIG2,
+        }
+    }
+}
+
+#[embassy_executor::task]
+async fn mixer_loop() {
+    info!("Starting mixer_loop()");
+
+    const BLOCK_SIZE: usize = 1024;
+    // IMA ADPCM files are 4 bits per sample, grab data a byte at a time
+    let mut medium_samples = AUDIO_MEDIUM[136 + 8..]
+        // TODO: hardcoded for now...
+        .chunks_exact(BLOCK_SIZE)
+        .cycle()
+        .flat_map(|data| {
+            let mut adpcm_output_buffer = [0_i16; 2 * BLOCK_SIZE - 7];
+            decode_adpcm_ima_ms(data, false, &mut adpcm_output_buffer).unwrap();
+            adpcm_output_buffer
+        });
+
+    let mut saw_value = 0u16;
+
+    loop {
+        let mut sample = medium_samples
+            .next()
+            .expect("iterator over cycle returned None somehow?!?!");
+        // down sample from 16 to 12 bit
+        sample >>= 4;
+        defmt::assert!((-2048..2048).contains(&sample), "12 bit, was: {}", sample);
+        // down sample 1 more bit to 11 bit
+        sample >>= 1;
+        defmt::assert!((-1024..1024).contains(&sample), "11 bit, was: {}", sample);
+        // convert to u16
+        let mut sample: u16 = if sample > 0 {
+            sample as u16 + 1024u16
+        } else {
+            (sample + 1024) as u16
+        };
+        defmt::assert!((0..2048).contains(&sample), "11 bit u16, was: {}", sample);
+        // 11 bit invert
+        sample = 2047 - sample;
+        // clear the left four bits
+        sample = (sample << 4) >> 4;
+        defmt::assert!(sample <= 2047, "was: {}", sample);
+
+        // saw from audio output 2, just because
+        saw_value += 8;
+        if saw_value > 2047 {
+            saw_value = 0
+        };
+
+        let dac_sample = DACSamplePair::new(sample, saw_value);
+
+        // push samples until channel full then block the loop
+        AUDIO_OUT_SAMPLES.send(dac_sample).await;
+
+        // ticker.next().await
+    }
+}
+
 // ==== ==== CORE1 data and processing ==== ====
 // const AUDIO_HEAVY: &[u8; 48044] = include_bytes!("../data/sine_48_440.wav");
 // const AUDIO_MEDIUM: &[u8; 12432] = include_bytes!("../data/sine_medium.wav");
 // const AUDIO_LIGHT: &[u8; 12432] = include_bytes!("../data/sine_light.wav");
 
-const AUDIO_MEDIUM: &[u8; 123024] = include_bytes!("../data/sine_long.wav");
-// const AUDIO_MEDIUM: &[u8; 441488] = include_bytes!("../data/backyard_thunder_01.wav");
+// const AUDIO_MEDIUM: &[u8; 123024] = include_bytes!("../data/sine_long.wav");
+const AUDIO_MEDIUM: &[u8; 441488] = include_bytes!("../data/backyard_thunder_01.wav");
 
 /// Audio processing loop
 ///
@@ -362,30 +440,6 @@ async fn audio_loop(
     let mut spi = spi::Spi::new_txonly(spi0, clk, mosi, dma0, config);
     let mut cs = Output::new(cs_pin, Level::High);
 
-    // DAC config bits
-    // 0: channel select 0 = A, 1 = B
-    // 1: unused
-    // 2: 0 = 2x gain, 1 = 1x
-    // 3: 0 = shutdown channel
-    let dac_config_a = 0b0001000000000000u16;
-    let dac_config_b = 0b1001000000000000u16;
-    let mut dac_buffer_a: [u8; 2];
-    let mut dac_buffer_b: [u8; 2];
-
-    const BLOCK_SIZE: usize = 1024;
-    // IMA ADPCM files are 4 bits per sample, grab data a byte at a time
-    let mut medium_samples = AUDIO_MEDIUM[136 + 8..]
-        // TODO: hardcoded for now...
-        .chunks_exact(BLOCK_SIZE)
-        .cycle()
-        .flat_map(|data| {
-            let mut adpcm_output_buffer = [0_i16; 2 * BLOCK_SIZE - 7];
-            decode_adpcm_ima_ms(data, false, &mut adpcm_output_buffer).unwrap();
-            adpcm_output_buffer
-        });
-
-    let mut saw_value = 0u16;
-
     // Since embassy_rp only supports a fixed 1_000_000 hz tick rate, we can
     // only approximate 48_000 hz. Measured at ~ 47_630, with significant jitter.
     // TODO: look into configuring a custom interrupt and running this task
@@ -400,46 +454,18 @@ async fn audio_loop(
             AUDIO_FREQ_COUNTER.store(local_counter, Ordering::Relaxed);
         }
 
-        let mut sample = medium_samples
-            .next()
-            .expect("iterator over cycle returned None somehow?!?!");
-        // down sample from 16 to 12 bit
-        sample >>= 4;
-        defmt::assert!((-2048..2048).contains(&sample), "12 bit, was: {}", sample);
-        // down sample 1 more bit to 11 bit
-        sample >>= 1;
-        defmt::assert!((-1024..1024).contains(&sample), "11 bit, was: {}", sample);
-        // convert to u16
-        let mut sample: u16 = if sample > 0 {
-            sample as u16 + 1024u16
-        } else {
-            (sample + 1024) as u16
-        };
-        defmt::assert!((0..2048).contains(&sample), "11 bit u16, was: {}", sample);
-        // 11 bit invert
-        sample = 2047 - sample;
-        // clear the left four bits
-        sample = (sample << 4) >> 4;
-        defmt::assert!(sample <= 2047, "was: {}", sample);
-        dac_buffer_a = (sample | dac_config_a).to_be_bytes();
+        let dac_sample_pair = AUDIO_OUT_SAMPLES.receive().await;
 
         // manually handling samples above... consider using InputValue
         // let sample = InputValue::from_i16(sample, false);
         // dac_buffer = (sample.to_output_inverted() | dac_config_a).to_be_bytes();
 
-        // saw from audio output b, just because
-        dac_buffer_b = (saw_value | dac_config_b).to_be_bytes();
-        saw_value += 8;
-        if saw_value > 2047 {
-            saw_value = 0
-        };
-
         cs.set_low();
-        spi.blocking_write(&dac_buffer_a)
+        spi.blocking_write(&dac_sample_pair.audio1.to_be_bytes())
             .unwrap_or_else(|e| error!("error writing buff a to DAC: {}", e));
         cs.set_high();
         cs.set_low();
-        spi.blocking_write(&dac_buffer_b)
+        spi.blocking_write(&dac_sample_pair.audio2.to_be_bytes())
             .unwrap_or_else(|e| error!("error writing buff b to DAC: {}", e));
         cs.set_high();
 
@@ -457,6 +483,11 @@ async fn audio_loop(
             // fetch_max() also updates the atomic value to the max
             AUDIO_MAX_TICKS.fetch_max(diff, Ordering::Relaxed);
             local_max_ticks = diff;
+        }
+        // reset max every second, for better reporting
+        if local_counter % 48000 == 0 {
+            local_max_ticks = 0;
+            AUDIO_MAX_TICKS.store(0, Ordering::Relaxed);
         }
 
         pulse2.set_low();
