@@ -139,7 +139,14 @@ fn main() -> ! {
         )));
         unwrap!(spawner.spawn(periodic_stats()));
         unwrap!(spawner.spawn(mixer_loop()));
+        unwrap!(spawner.spawn(logic_loop()));
     })
+}
+
+#[embassy_executor::task]
+async fn logic_loop() {
+    info!("Starting logic_loop()");
+    let mux_rcv = MUX_INPUT.anon_receiver();
 }
 
 // this loop should probably be moved into a shared library
@@ -293,6 +300,7 @@ fn _led_gamma(value: u16) -> u16 {
 
 #[embassy_executor::task]
 async fn periodic_stats() {
+    info!("Starting periodic_stats()");
     debug!("sys clock: {}", clocks::clk_sys_freq());
 
     let mut mux_rcv = MUX_INPUT.anon_receiver();
@@ -348,33 +356,42 @@ impl DACSamplePair {
     }
 }
 
-// const AUDIO_HEAVY: &[u8; 12432] = include_bytes!("../data/sine_heavy.wav");
+const AUDIO_HEAVY: &[u8; 12432] = include_bytes!("../data/sine_heavy.wav");
 // const AUDIO_HEAVY: &[u8; 4034704] = include_bytes!("../data/backyard_rain_heavy_loop.wav");
 const AUDIO_MEDIUM: &[u8; 12432] = include_bytes!("../data/sine_medium.wav");
 // const AUDIO_MEDIUM: &[u8; 7409808] = include_bytes!("../data/backyard_rain_medium_loop.wav");
 
-// const AUDIO_LIGHT: &[u8; 12432] = include_bytes!("../data/sine_light.wav");
+const AUDIO_LIGHT: &[u8; 12432] = include_bytes!("../data/sine_light.wav");
 // const AUDIO_LIGHT: &[u8; 4677776] = include_bytes!("../data/backyard_rain_light_loop.wav");
 
 // alternates for testing
 // const AUDIO_MEDIUM: &[u8; 123024] = include_bytes!("../data/sine_long.wav");
 // const AUDIO_MEDIUM: &[u8; 441488] = include_bytes!("../data/backyard_thunder_01.wav");
 
+fn adpcm_to_stream(data: &[u8]) -> impl Iterator<Item = i16> + use<'_> {
+    const BLOCK_SIZE: usize = 1024;
+
+    // IMA ADPCM files are 4 bits per sample, these files have a consistent
+    // 1024 byte block size and the WAV DATA chunk starts at byte 136.
+    // It would probably be better to actually parse the WAV files if they
+    // were updatable... but... they aren't and this works for now.
+    // TODO: Are we leaving unprocessed real data after the last full block?
+    data.chunks_exact(BLOCK_SIZE).cycle().flat_map(|data| {
+        let mut adpcm_output_buffer = [0_i16; 2 * BLOCK_SIZE - 7];
+        decode_adpcm_ima_ms(data, false, &mut adpcm_output_buffer).unwrap();
+        adpcm_output_buffer
+    })
+}
+
 #[embassy_executor::task]
 async fn mixer_loop() {
     info!("Starting mixer_loop()");
 
-    const BLOCK_SIZE: usize = 1024;
-    // IMA ADPCM files are 4 bits per sample, grab data a byte at a time
-    let mut medium_samples = AUDIO_MEDIUM[136 + 8..]
-        // TODO: hardcoded for now...
-        .chunks_exact(BLOCK_SIZE)
-        .cycle()
-        .flat_map(|data| {
-            let mut adpcm_output_buffer = [0_i16; 2 * BLOCK_SIZE - 7];
-            decode_adpcm_ima_ms(data, false, &mut adpcm_output_buffer).unwrap();
-            adpcm_output_buffer
-        });
+    // Create three iterators which produce full range i16 samples by
+    // decoding the ADPCM blocks and repeatedly cylcing through the data.
+    let mut light_samples = adpcm_to_stream(&AUDIO_LIGHT[136 + 8..]);
+    let mut medium_samples = adpcm_to_stream(&AUDIO_MEDIUM[136 + 8..]);
+    let mut heavy_samples = adpcm_to_stream(&AUDIO_HEAVY[136 + 8..]);
 
     let mut saw_value = 0u16;
 
@@ -400,6 +417,9 @@ async fn mixer_loop() {
         // clear the left four bits
         sample = (sample << 4) >> 4;
         defmt::assert!(sample <= 2047, "was: {}", sample);
+        // manually handling samples above... consider using InputValue
+        // let sample = InputValue::from_i16(sample, false);
+        // dac_buffer = (sample.to_output_inverted() | dac_config_a).to_be_bytes();
 
         // saw from audio output 2, just because
         saw_value += 8;
@@ -461,10 +481,6 @@ async fn sample_write_loop(
         }
 
         let dac_sample_pair = AUDIO_OUT_SAMPLES.receive().await;
-
-        // manually handling samples above... consider using InputValue
-        // let sample = InputValue::from_i16(sample, false);
-        // dac_buffer = (sample.to_output_inverted() | dac_config_a).to_be_bytes();
 
         cs.set_low();
         spi.blocking_write(&dac_sample_pair.audio1.to_be_bytes())
