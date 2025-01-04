@@ -124,7 +124,7 @@ fn main() -> ! {
         move || {
             let executor1 = EXECUTOR1.init(Executor::new());
             executor1.run(|spawner| {
-                unwrap!(spawner.spawn(audio_loop(
+                unwrap!(spawner.spawn(sample_write_loop(
                     p.SPI0, p.PIN_18, p.PIN_19, p.DMA_CH0, p.PIN_21, p.PIN_8, p.PIN_9,
                 )))
             })
@@ -348,6 +348,18 @@ impl DACSamplePair {
     }
 }
 
+// const AUDIO_HEAVY: &[u8; 12432] = include_bytes!("../data/sine_heavy.wav");
+// const AUDIO_HEAVY: &[u8; 4034704] = include_bytes!("../data/backyard_rain_heavy_loop.wav");
+const AUDIO_MEDIUM: &[u8; 12432] = include_bytes!("../data/sine_medium.wav");
+// const AUDIO_MEDIUM: &[u8; 7409808] = include_bytes!("../data/backyard_rain_medium_loop.wav");
+
+// const AUDIO_LIGHT: &[u8; 12432] = include_bytes!("../data/sine_light.wav");
+// const AUDIO_LIGHT: &[u8; 4677776] = include_bytes!("../data/backyard_rain_light_loop.wav");
+
+// alternates for testing
+// const AUDIO_MEDIUM: &[u8; 123024] = include_bytes!("../data/sine_long.wav");
+// const AUDIO_MEDIUM: &[u8; 441488] = include_bytes!("../data/backyard_thunder_01.wav");
+
 #[embassy_executor::task]
 async fn mixer_loop() {
     info!("Starting mixer_loop()");
@@ -405,18 +417,12 @@ async fn mixer_loop() {
 }
 
 // ==== ==== CORE1 data and processing ==== ====
-// const AUDIO_HEAVY: &[u8; 48044] = include_bytes!("../data/sine_48_440.wav");
-// const AUDIO_MEDIUM: &[u8; 12432] = include_bytes!("../data/sine_medium.wav");
-// const AUDIO_LIGHT: &[u8; 12432] = include_bytes!("../data/sine_light.wav");
 
-// const AUDIO_MEDIUM: &[u8; 123024] = include_bytes!("../data/sine_long.wav");
-const AUDIO_MEDIUM: &[u8; 441488] = include_bytes!("../data/backyard_thunder_01.wav");
-
-/// Audio processing loop
+/// Audio sample writing loop
 ///
 /// Runs on the second core (CORE1), all shared data must be safe for concurrency.
 #[embassy_executor::task]
-async fn audio_loop(
+async fn sample_write_loop(
     spi0: peripherals::SPI0,
     clk: peripherals::PIN_18,
     mosi: peripherals::PIN_19,
