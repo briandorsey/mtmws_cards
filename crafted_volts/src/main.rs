@@ -18,7 +18,7 @@ use embassy_time::Timer;
 use gpio::{Level, Output};
 use {defmt_rtt as _, panic_probe as _};
 
-use wscomp::{InputValue, JackValue};
+use wscomp::{JackSample, Sample};
 
 // This is an attempt to learn how use all inputs & outputs of the Music Thing Modular Workshop System Computer via Rust & Embassy.
 // The card maps knobs and the switch to manually set voltages.
@@ -61,31 +61,31 @@ impl ZSwitch {
 /// State of inputs collected via the ADC mux device.
 #[derive(Clone, Format)]
 struct MuxState {
-    main_knob: InputValue,
-    x_knob: InputValue,
-    y_knob: InputValue,
+    main_knob: Sample,
+    x_knob: Sample,
+    y_knob: Sample,
     zswitch: ZSwitch,
-    cv1: JackValue,
-    cv2: JackValue,
+    cv1: JackSample,
+    cv2: JackSample,
     sequence_counter: usize,
 }
 
 impl MuxState {
     fn default() -> Self {
         MuxState {
-            main_knob: InputValue::new(InputValue::CENTER, false),
-            x_knob: InputValue::new(InputValue::CENTER, false),
-            y_knob: InputValue::new(InputValue::CENTER, false),
+            main_knob: Sample::new(Sample::CENTER, false),
+            x_knob: Sample::new(Sample::CENTER, false),
+            y_knob: Sample::new(Sample::CENTER, false),
             zswitch: ZSwitch::default(),
             // CV inputs are not inverted according to docs.  0V reads ~ 2030
             // NOTE: I get inverted data, and ~2060 as 0v
-            cv1: JackValue::new(
-                InputValue::new(InputValue::CENTER, true),
-                InputValue::new(InputValue::CENTER, true),
+            cv1: JackSample::new(
+                Sample::new(Sample::CENTER, true),
+                Sample::new(Sample::CENTER, true),
             ),
-            cv2: JackValue::new(
-                InputValue::new(InputValue::CENTER, true),
-                InputValue::new(InputValue::CENTER, true),
+            cv2: JackSample::new(
+                Sample::new(Sample::CENTER, true),
+                Sample::new(Sample::CENTER, true),
             ),
             sequence_counter: 0,
         }
@@ -95,20 +95,20 @@ impl MuxState {
 /// State of audio inputs collected via direct ADC.
 #[derive(Clone, Format)]
 struct AudioState {
-    audio1: JackValue,
-    audio2: JackValue,
+    audio1: JackSample,
+    audio2: JackSample,
 }
 
 impl AudioState {
     fn default() -> Self {
         AudioState {
-            audio1: JackValue::new(
-                InputValue::new(InputValue::CENTER, true),
-                InputValue::new(InputValue::CENTER, true),
+            audio1: JackSample::new(
+                Sample::new(Sample::CENTER, true),
+                Sample::new(Sample::CENTER, true),
             ),
-            audio2: JackValue::new(
-                InputValue::new(InputValue::CENTER, true),
-                InputValue::new(InputValue::CENTER, true),
+            audio2: JackSample::new(
+                Sample::new(Sample::CENTER, true),
+                Sample::new(Sample::CENTER, true),
             ),
         }
     }
@@ -391,10 +391,10 @@ async fn audio_loop(
             ) {
                 (Some(in1), Some(in2)) => {
                     let mix = (*in1 + *in2) / 2;
-                    output_value = (mix * output_value) / InputValue::OFFSET;
+                    output_value = (mix * output_value) / Sample::OFFSET;
                 }
                 (Some(input), None) | (None, Some(input)) => {
-                    output_value = (*input * output_value) / InputValue::OFFSET;
+                    output_value = (*input * output_value) / Sample::OFFSET;
                 }
                 (None, None) => {}
             }
@@ -496,7 +496,7 @@ async fn cv_loop(
             // If cable plugged into cv1, attenuvert that signal
             if let Some(input_cv) = mux_state.cv1.plugged_value() {
                 // info!("x: {}, cv: {}", x_value, input_cv);
-                x_value = (*input_cv * x_value) / InputValue::OFFSET;
+                x_value = (*input_cv * x_value) / Sample::OFFSET;
             }
             cv1_pwm
                 .set_duty_cycle_fraction(x_value.to_output_inverted(), 2047)
@@ -519,7 +519,7 @@ async fn cv_loop(
             // If cable plugged into cv2, attenuvert that signal
             if let Some(input_cv) = mux_state.cv2.plugged_value() {
                 // info!("y: {}, cv: {}", y_value, input_cv);
-                y_value = (*input_cv * y_value) / InputValue::OFFSET;
+                y_value = (*input_cv * y_value) / Sample::OFFSET;
             }
             cv2_pwm
                 .set_duty_cycle_fraction(y_value.to_output_inverted(), 2047)

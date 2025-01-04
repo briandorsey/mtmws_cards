@@ -26,7 +26,7 @@ use portable_atomic::{AtomicU32, Ordering};
 use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
-use wscomp::{InputValue, JackValue};
+use wscomp::{JackSample, Sample};
 
 // This is a port of the Backyard Rain Soundscape app from Playdate to the
 // Music Thing Modular Workshop System Computer via Rust & Embassy.
@@ -63,31 +63,31 @@ impl ZSwitch {
 /// State of inputs collected via the ADC mux device.
 #[derive(Clone, Format)]
 struct MuxState {
-    main_knob: InputValue,
-    x_knob: InputValue,
-    y_knob: InputValue,
+    main_knob: Sample,
+    x_knob: Sample,
+    y_knob: Sample,
     zswitch: ZSwitch,
-    cv1: JackValue,
-    cv2: JackValue,
+    cv1: JackSample,
+    cv2: JackSample,
     sequence_counter: usize,
 }
 
 impl MuxState {
     fn default() -> Self {
         MuxState {
-            main_knob: InputValue::new(InputValue::CENTER, false),
-            x_knob: InputValue::new(InputValue::CENTER, false),
-            y_knob: InputValue::new(InputValue::CENTER, false),
+            main_knob: Sample::new(Sample::CENTER, false),
+            x_knob: Sample::new(Sample::CENTER, false),
+            y_knob: Sample::new(Sample::CENTER, false),
             zswitch: ZSwitch::default(),
             // CV inputs are not inverted according to docs.  0V reads ~ 2030
             // NOTE: I get inverted data, and ~2060 as 0v
-            cv1: JackValue::new(
-                InputValue::new(InputValue::CENTER, true),
-                InputValue::new(InputValue::CENTER, true),
+            cv1: JackSample::new(
+                Sample::new(Sample::CENTER, true),
+                Sample::new(Sample::CENTER, true),
             ),
-            cv2: JackValue::new(
-                InputValue::new(InputValue::CENTER, true),
-                InputValue::new(InputValue::CENTER, true),
+            cv2: JackSample::new(
+                Sample::new(Sample::CENTER, true),
+                Sample::new(Sample::CENTER, true),
             ),
             sequence_counter: 0,
         }
@@ -417,8 +417,8 @@ async fn mixer_loop() {
         // clear the left four bits
         sample = (sample << 4) >> 4;
         defmt::assert!(sample <= 2047, "was: {}", sample);
-        // manually handling samples above... consider using InputValue
-        // let sample = InputValue::from_i16(sample, false);
+        // manually handling samples above... consider using Sample
+        // let sample = Sample::from_i16(sample, false);
         // dac_buffer = (sample.to_output_inverted() | dac_config_a).to_be_bytes();
 
         // saw from audio output 2, just because

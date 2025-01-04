@@ -15,12 +15,12 @@ use defmt::*;
 ///
 /// Values are smoothed over recent updates (count based on `ACCUM_BITS`).
 #[derive(Format, PartialEq, Copy, Clone)]
-pub struct InputValue {
+pub struct Sample {
     accumulated_raw: i32,
     inverted_source: bool,
 }
 
-impl Debug for InputValue {
+impl Debug for Sample {
     fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
         core::write!(
             f,
@@ -31,7 +31,7 @@ impl Debug for InputValue {
     }
 }
 
-impl InputValue {
+impl Sample {
     // CONST for min/max values (12 bit limits, 11 on each positive/negative)
     pub const MIN: i32 = -2_i32.pow(11);
     pub const MAX: i32 = 2_i32.pow(11) - 1;
@@ -41,7 +41,7 @@ impl InputValue {
 
     // New `InputValue` from i32
     pub fn new(raw_value: i32, invert: bool) -> Self {
-        InputValue {
+        Sample {
             accumulated_raw: match invert {
                 false => raw_value << Self::ACCUM_BITS,
                 true => -raw_value << Self::ACCUM_BITS,
@@ -86,7 +86,7 @@ impl InputValue {
     }
 }
 
-impl Add for InputValue {
+impl Add for Sample {
     type Output = Self;
 
     fn add(mut self, rhs: Self) -> Self::Output {
@@ -95,7 +95,7 @@ impl Add for InputValue {
     }
 }
 
-impl Sub for InputValue {
+impl Sub for Sample {
     type Output = Self;
 
     fn sub(mut self, rhs: Self) -> Self::Output {
@@ -104,7 +104,7 @@ impl Sub for InputValue {
     }
 }
 
-impl Mul for InputValue {
+impl Mul for Sample {
     type Output = Self;
 
     fn mul(mut self, rhs: Self) -> Self::Output {
@@ -115,7 +115,7 @@ impl Mul for InputValue {
     }
 }
 
-impl Mul<i32> for InputValue {
+impl Mul<i32> for Sample {
     type Output = Self;
 
     fn mul(mut self, rhs: i32) -> Self::Output {
@@ -125,7 +125,7 @@ impl Mul<i32> for InputValue {
     }
 }
 
-impl Div<i32> for InputValue {
+impl Div<i32> for Sample {
     type Output = Self;
 
     fn div(mut self, rhs: i32) -> Self::Output {
@@ -150,20 +150,20 @@ impl Div<i32> for InputValue {
 /// which happen to have the right voltage difference between them from a single
 /// sample.
 #[derive(Format, Clone)]
-pub struct JackValue {
-    pub raw: InputValue,
-    pub probe: InputValue,
+pub struct JackSample {
+    pub raw: Sample,
+    pub probe: Sample,
 }
 
 // TODO: implement probe logic
-impl JackValue {
-    pub fn new(raw: InputValue, probe: InputValue) -> JackValue {
-        JackValue { raw, probe }
+impl JackSample {
+    pub fn new(raw: Sample, probe: Sample) -> JackSample {
+        JackSample { raw, probe }
     }
 
-    pub fn plugged_value(&self) -> Option<&InputValue> {
+    pub fn plugged_value(&self) -> Option<&Sample> {
         let mut diff = self.probe.accumulated_raw - self.raw.accumulated_raw;
-        diff >>= InputValue::ACCUM_BITS;
+        diff >>= Sample::ACCUM_BITS;
         // determined through testing my unit, may need adjusting
         if diff > 300 {
             None
@@ -176,109 +176,85 @@ impl JackValue {
 #[cfg(test)]
 mod test {
     // Note this useful idiom: importing names from outer (for mod tests) scope.
-    use super::InputValue;
+    use super::Sample;
 
     #[test]
     fn test_input_value_basics() {
-        assert_eq!(InputValue::MIN, -2048);
-        assert_eq!(InputValue::MAX, 2047);
+        assert_eq!(Sample::MIN, -2048);
+        assert_eq!(Sample::MAX, 2047);
     }
 
     #[test]
     fn test_input_value_to_clamped() {
         // clamp to 12 bit values when inputs are above range
-        assert_eq!(
-            InputValue::from_u16(8000, false).to_clamped(),
-            InputValue::MAX
-        );
-        assert_eq!(
-            InputValue::from_u16(5000, false).to_clamped(),
-            InputValue::MAX
-        );
-        assert_eq!(
-            InputValue::from_u16(4096, false).to_clamped(),
-            InputValue::MAX
-        );
+        assert_eq!(Sample::from_u16(8000, false).to_clamped(), Sample::MAX);
+        assert_eq!(Sample::from_u16(5000, false).to_clamped(), Sample::MAX);
+        assert_eq!(Sample::from_u16(4096, false).to_clamped(), Sample::MAX);
     }
 
     #[test]
     fn test_input_value_from() {
-        assert_eq!(InputValue::from_u16(0, false).to_clamped(), InputValue::MIN);
-        assert_eq!(InputValue::from_u16(2048, false).to_clamped(), 0);
-        assert_eq!(
-            InputValue::from_u16(4095, false).to_clamped(),
-            InputValue::MAX
-        );
+        assert_eq!(Sample::from_u16(0, false).to_clamped(), Sample::MIN);
+        assert_eq!(Sample::from_u16(2048, false).to_clamped(), 0);
+        assert_eq!(Sample::from_u16(4095, false).to_clamped(), Sample::MAX);
     }
 
     #[test]
     fn test_input_value_to_output() {
-        assert_eq!(
-            InputValue::new(InputValue::CENTER, false).to_output(),
-            1024_u16
-        );
+        assert_eq!(Sample::new(Sample::CENTER, false).to_output(), 1024_u16);
 
         // output values are half of input (11 bit from 12 bit)
-        assert_eq!(InputValue::from_u16(0, false).to_output(), 0);
-        assert_eq!(InputValue::from_u16(2_u16, false).to_output(), 1_u16);
-        assert_eq!(InputValue::from_u16(1024_u16, false).to_output(), 512_u16);
-        assert_eq!(InputValue::from_u16(2048_u16, false).to_output(), 1024_u16);
+        assert_eq!(Sample::from_u16(0, false).to_output(), 0);
+        assert_eq!(Sample::from_u16(2_u16, false).to_output(), 1_u16);
+        assert_eq!(Sample::from_u16(1024_u16, false).to_output(), 512_u16);
+        assert_eq!(Sample::from_u16(2048_u16, false).to_output(), 1024_u16);
 
         // clamp to 11 bit values in to_output() when inputs are above range
-        assert_eq!(InputValue::from_u16(8000, false).to_output(), 2047_u16);
-        assert_eq!(InputValue::from_u16(5000, false).to_output(), 2047_u16);
-        assert_eq!(InputValue::from_u16(4096, false).to_output(), 2047_u16);
+        assert_eq!(Sample::from_u16(8000, false).to_output(), 2047_u16);
+        assert_eq!(Sample::from_u16(5000, false).to_output(), 2047_u16);
+        assert_eq!(Sample::from_u16(4096, false).to_output(), 2047_u16);
 
-        let below_range = InputValue::from_u16(0, false) - InputValue::new(5000, false);
+        let below_range = Sample::from_u16(0, false) - Sample::new(5000, false);
         assert_eq!(below_range.to_output(), 0_u16);
     }
 
     #[test]
     fn test_input_value_inverted_to_output() {
-        assert_eq!(
-            InputValue::new(InputValue::CENTER, true).to_output(),
-            1024_u16
-        );
+        assert_eq!(Sample::new(Sample::CENTER, true).to_output(), 1024_u16);
 
         // output values are half of input (11 bit from 12 bit)
-        assert_eq!(InputValue::from_u16(0, true).to_output(), 2047);
+        assert_eq!(Sample::from_u16(0, true).to_output(), 2047);
         // assert_eq!(InputValue::from_u16(2_u16, true).to_output(), 2046_u16);
-        assert_eq!(InputValue::from_u16(1024_u16, true).to_output(), 1536_u16);
-        assert_eq!(InputValue::from_u16(2047_u16, true).to_output(), 1024_u16);
+        assert_eq!(Sample::from_u16(1024_u16, true).to_output(), 1536_u16);
+        assert_eq!(Sample::from_u16(2047_u16, true).to_output(), 1024_u16);
 
         // clamp to 11 bit values in to_output() when inputs are above range
-        assert_eq!(InputValue::from_u16(8000, true).to_output(), 0_u16);
-        assert_eq!(InputValue::from_u16(5000, true).to_output(), 0_u16);
-        assert_eq!(InputValue::from_u16(4096, true).to_output(), 0_u16);
+        assert_eq!(Sample::from_u16(8000, true).to_output(), 0_u16);
+        assert_eq!(Sample::from_u16(5000, true).to_output(), 0_u16);
+        assert_eq!(Sample::from_u16(4096, true).to_output(), 0_u16);
 
-        let below_range = InputValue::from_u16(0, true) - InputValue::new(5000, true);
+        let below_range = Sample::from_u16(0, true) - Sample::new(5000, true);
         assert_eq!(below_range.to_output(), 2047_u16);
     }
 
     #[test]
     fn test_input_value_math() {
         assert_eq!(
-            InputValue::new(123, false) + InputValue::new(456, false),
-            InputValue::new(579, false)
+            Sample::new(123, false) + Sample::new(456, false),
+            Sample::new(579, false)
         );
 
-        assert_eq!(InputValue::new(123, false) * 1, InputValue::new(123, false));
-        assert_eq!(InputValue::new(123, false) * 2, InputValue::new(246, false));
-        assert_eq!(
-            InputValue::new(123, false) * -1,
-            InputValue::new(-123, false)
-        );
+        assert_eq!(Sample::new(123, false) * 1, Sample::new(123, false));
+        assert_eq!(Sample::new(123, false) * 2, Sample::new(246, false));
+        assert_eq!(Sample::new(123, false) * -1, Sample::new(-123, false));
 
         #[allow(clippy::erasing_op)]
-        let expected = InputValue::new(123, false) * 0;
-        assert_eq!(expected, InputValue::new(0, false));
+        let expected = Sample::new(123, false) * 0;
+        assert_eq!(expected, Sample::new(0, false));
 
         // division
-        assert_eq!(InputValue::new(123, false) / 1, InputValue::new(123, false));
-        assert_eq!(InputValue::new(240, false) / 2, InputValue::new(120, false));
-        assert_eq!(
-            InputValue::new(123, false) / -1,
-            InputValue::new(-123, false)
-        );
+        assert_eq!(Sample::new(123, false) / 1, Sample::new(123, false));
+        assert_eq!(Sample::new(240, false) / 2, Sample::new(120, false));
+        assert_eq!(Sample::new(123, false) / -1, Sample::new(-123, false));
     }
 }
