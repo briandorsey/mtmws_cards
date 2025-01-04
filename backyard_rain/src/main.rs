@@ -451,7 +451,7 @@ async fn sample_write_loop(
     pulse1_pin: peripherals::PIN_8, // maybe temp, for measuring sample rate
     pulse2_pin: peripherals::PIN_9,
 ) {
-    info!("Starting audio_loop()");
+    info!("Starting sample_write_loop()");
     let mut local_counter = 0u32;
     let mut local_max_ticks = 0u32;
     let mut previous_loop_end = Instant::now();
