@@ -11,8 +11,8 @@ use embassy_rp::gpio::{self};
 // use embassy_rp::interrupt;
 use embassy_rp::multicore::{spawn_core1, Stack};
 use embassy_rp::peripherals;
-// use embassy_rp::pwm;
-// use embassy_rp::pwm::SetDutyCycle;
+use embassy_rp::pwm;
+use embassy_rp::pwm::SetDutyCycle;
 use embassy_rp::spi;
 use embassy_rp::{adc, Peripheral};
 use embassy_sync::blocking_mutex::raw::CriticalSectionRawMutex;
@@ -41,8 +41,25 @@ bind_interrupts!(struct Irqs {
     ADC_IRQ_FIFO => adc::InterruptHandler;
 });
 
+// TODO: review mutexes... maybe only need CriticalSection for cross-CPU data?
 // single writer, multple reader
+
+/// [`MuxState`] with most recent values of inputs behind the mux switcher, wrapped in [`Watch`].
+///
+/// Updated by input_loop(). All inputs except audio and pulse are behind the
+/// mux switcher.
 static MUX_INPUT: Watch<CriticalSectionRawMutex, MuxState, 2> = Watch::new();
+
+/// Logical rain intensity stored as a [`Sample`], wrapped in [`Watch`].
+///
+/// Updated by logic_loop().
+///
+/// ```text
+/// Sample::MAX = 100% heavy rain
+/// Sample::ZERO = 100% medium rain
+/// Sample::MIN = 100% light rain
+/// ```
+static INTENSITY: Watch<CriticalSectionRawMutex, Sample, 2> = Watch::new();
 // static AUDIO_INPUT: Watch<CriticalSectionRawMutex, AudioState, 2> = Watch::new();
 static AUDIO_OUT_SAMPLES: Channel<CriticalSectionRawMutex, DACSamplePair, 1024> = Channel::new();
 
@@ -140,13 +157,121 @@ fn main() -> ! {
         unwrap!(spawner.spawn(periodic_stats()));
         unwrap!(spawner.spawn(mixer_loop()));
         unwrap!(spawner.spawn(logic_loop()));
+        unwrap!(spawner.spawn(update_leds_loop(
+            p.PWM_SLICE5,
+            p.PIN_10,
+            p.PIN_11,
+            p.PWM_SLICE6,
+            p.PIN_12,
+            p.PIN_13,
+            p.PWM_SLICE7,
+            p.PIN_14,
+            p.PIN_15,
+        )));
     })
 }
 
 #[embassy_executor::task]
 async fn logic_loop() {
     info!("Starting logic_loop()");
-    let mux_rcv = MUX_INPUT.anon_receiver();
+
+    let intensity_snd = INTENSITY.sender();
+    intensity_snd.send(Sample::new(0, false));
+
+    let mut mux_rcv = MUX_INPUT.anon_receiver();
+
+    let mut ticker = Ticker::every(Duration::from_hz(60));
+    loop {
+        if let Some(mux_state) = mux_rcv.try_get() {
+            // map intensity directly to main knob for now
+            intensity_snd.send(mux_state.main_knob);
+        }
+        ticker.next().await
+    }
+}
+
+/// Rough LED brightness correction
+fn led_gamma(value: u16) -> u16 {
+    // based on: https://github.com/TomWhitwell/Workshop_Computer/blob/main/Demonstrations%2BHelloWorlds/CircuitPython/mtm_computer.py
+    let temp: u32 = value.into();
+    ((temp * temp) / 2048).clamp(0, u16::MAX.into()) as u16
+}
+
+fn set_led(led: &mut pwm::PwmOutput, value: u16) {
+    led.set_duty_cycle_fraction(led_gamma(value), 2047)
+        .unwrap_or_else(|_| error!("error setting LED 3 PWM to : {}", led_gamma(value)));
+}
+
+#[allow(clippy::too_many_arguments)]
+#[embassy_executor::task]
+async fn update_leds_loop(
+    led12_pwm_slice: peripherals::PWM_SLICE5,
+    led1_pin: peripherals::PIN_10,
+    led2_pin: peripherals::PIN_11,
+    led34_pwm_slice: peripherals::PWM_SLICE6,
+    led3_pin: peripherals::PIN_12,
+    led4_pin: peripherals::PIN_13,
+    led56_pwm_slice: peripherals::PWM_SLICE7,
+    led5_pin: peripherals::PIN_14,
+    led6_pin: peripherals::PIN_15,
+) {
+    info!("Starting update_leds_loop()");
+
+    // LED PWM setup
+    let mut led_pwm_config = pwm::Config::default();
+    // 11 bit PWM * 10. 10x is to increase PWM rate, reducing visible flicker.
+    led_pwm_config.top = 20470;
+
+    let pwm5 = pwm::Pwm::new_output_ab(led12_pwm_slice, led1_pin, led2_pin, led_pwm_config.clone());
+    let (Some(_led1), Some(mut led2)) = pwm5.split() else {
+        error!("Error setting up LED PWM channels for 1 & 2");
+        return;
+    };
+
+    let pwm6 = pwm::Pwm::new_output_ab(led34_pwm_slice, led3_pin, led4_pin, led_pwm_config.clone());
+    let (Some(_led3), Some(mut led4)) = pwm6.split() else {
+        error!("Error setting up LED PWM channels for 3 & 4");
+        return;
+    };
+
+    let pwm7 = pwm::Pwm::new_output_ab(led56_pwm_slice, led5_pin, led6_pin, led_pwm_config.clone());
+    let (Some(_led5), Some(mut led6)) = pwm7.split() else {
+        error!("Error setting up LED PWM channels for 5 & 6");
+        return;
+    };
+
+    let mut intensity_rcv = INTENSITY.anon_receiver();
+
+    let mut ticker = Ticker::every(Duration::from_hz(60));
+    loop {
+        // LEDs
+        // set_led(&mut led1, Sample::new(0, false).to_output_abs());
+        // set_led(&mut led3, Sample::new(0, false).to_output_abs());
+        // set_led(&mut led5, Sample::new(0, false).to_output_abs());
+
+        // right three leds visualize rain intensity
+
+        if let Some(intensity) = intensity_rcv.try_get() {
+            // led2 represents heavy rain
+            if intensity > Sample::new(0, false) {
+                set_led(&mut led2, intensity.to_output_abs());
+            } else {
+                set_led(&mut led2, Sample::new(0, false).to_output_abs());
+            }
+
+            // led4 represents medium rain
+            set_led(&mut led4, intensity.to_output_abs_inverted());
+
+            // led 6 represents light rain
+            if intensity < Sample::new(0, false) {
+                set_led(&mut led6, intensity.to_output_abs());
+            } else {
+                set_led(&mut led6, Sample::new(0, false).to_output_abs());
+            }
+        }
+
+        ticker.next().await
+    }
 }
 
 // this loop should probably be moved into a shared library
@@ -291,13 +416,6 @@ async fn input_loop(
     }
 }
 
-/// Rough LED brightness correction
-fn _led_gamma(value: u16) -> u16 {
-    // based on: https://github.com/TomWhitwell/Workshop_Computer/blob/main/Demonstrations%2BHelloWorlds/CircuitPython/mtm_computer.py
-    let temp: u32 = value.into();
-    ((temp * temp) / 2048).clamp(0, u16::MAX.into()) as u16
-}
-
 #[embassy_executor::task]
 async fn periodic_stats() {
     info!("Starting periodic_stats()");
@@ -389,9 +507,9 @@ async fn mixer_loop() {
 
     // Create three iterators which produce full range i16 samples by
     // decoding the ADPCM blocks and repeatedly cylcing through the data.
-    let mut light_samples = adpcm_to_stream(&AUDIO_LIGHT[136 + 8..]);
+    let _light_samples = adpcm_to_stream(&AUDIO_LIGHT[136 + 8..]);
     let mut medium_samples = adpcm_to_stream(&AUDIO_MEDIUM[136 + 8..]);
-    let mut heavy_samples = adpcm_to_stream(&AUDIO_HEAVY[136 + 8..]);
+    let _heavy_samples = adpcm_to_stream(&AUDIO_HEAVY[136 + 8..]);
 
     let mut saw_value = 0u16;
 

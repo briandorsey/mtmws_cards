@@ -14,7 +14,7 @@ use defmt::*;
 /// outside of 12 bit range (allowing for math & accumulations, etc).
 ///
 /// Values are smoothed over recent updates (count based on `ACCUM_BITS`).
-#[derive(Format, PartialEq, Copy, Clone)]
+#[derive(Format, PartialEq, Copy, Clone, PartialOrd)]
 pub struct Sample {
     accumulated_raw: i32,
     inverted_source: bool,
@@ -70,6 +70,8 @@ impl Sample {
             (self.accumulated_raw - (self.accumulated_raw >> Self::ACCUM_BITS)) + value;
     }
 
+    // TODO: clean these up... flags, something? Think about the design.
+
     /// Saturating conversion into 11 bit safe u16 for output
     pub fn to_output(&self) -> u16 {
         // clamp self, divide by 2 (by shifting right) and convert to u16
@@ -81,8 +83,24 @@ impl Sample {
         2047_u16.saturating_sub(self.to_output())
     }
 
+    /// Saturating conversion into 11 bit safe u16 for output, absolute value.
+    pub fn to_output_abs(&self) -> u16 {
+        // clamp self, take absolute value, clamp to max (negative i values
+        // are one larger than positive), and convert to u16
+        (self.to_clamped().abs()).min(Self::MAX) as u16
+    }
+
+    /// Saturating conversion into 11 bit safe u16 for output, inverted
+    pub fn to_output_abs_inverted(&self) -> u16 {
+        2047_u16.saturating_sub(self.to_output_abs())
+    }
+
     pub fn to_clamped(&self) -> i32 {
         (self.accumulated_raw >> Self::ACCUM_BITS).clamp(Self::MIN, Self::MAX)
+    }
+
+    pub fn to_inverted(&self) -> Self {
+        Self::new(-self.accumulated_raw, self.inverted_source)
     }
 }
 
