@@ -3,7 +3,7 @@ name = "backyard_rain"
 version = "0.1.0"
 description = "Nature soundscape audio. A cozy rain ambience mix for background listening"
 license = "MIT OR Apache-2.0"
-author = "Brian Dorsey"
+authors = ["Brian Dorsey"]
 
 edition = "2021"
 
