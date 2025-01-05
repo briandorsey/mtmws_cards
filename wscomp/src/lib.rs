@@ -5,6 +5,11 @@ use core::ops::{Add, Div, Mul, Shr, Sub};
 
 use defmt::*;
 
+// Sample todos
+//
+// TODO: clean up to_output methods... flags, something? Think about the design.
+// TODO: think about constructors, probably want to error when value out of range.
+
 /// A 12 bit value representing input from a knob or input jack's ADC
 ///
 /// Normalized to the range -2048 to 2047 inclusive. Stored as i32 to give
@@ -39,7 +44,10 @@ impl Sample {
     pub const OFFSET: i32 = 2_i32.pow(11);
     const ACCUM_BITS: u8 = 3;
 
-    // New `InputValue` from i32
+    /// New `InputValue` from i32
+    ///
+    /// Values are expected to already be 12bit (-2048..2048), but this
+    /// is not checked.
     pub fn new(raw_value: i32, invert: bool) -> Self {
         Sample {
             accumulated_raw: match invert {
@@ -51,6 +59,9 @@ impl Sample {
     }
 
     /// New `InputValue` from u16 and offset value so center is at zero
+    ///
+    /// Values are expected to already be 12bit (0..4096), but this
+    /// is not checked.
     pub fn from_u16(value: u16, invert: bool) -> Self {
         let mut output = i32::from(value);
         output -= Self::OFFSET;
@@ -69,8 +80,6 @@ impl Sample {
         self.accumulated_raw =
             (self.accumulated_raw - (self.accumulated_raw >> Self::ACCUM_BITS)) + value;
     }
-
-    // TODO: clean these up... flags, something? Think about the design.
 
     /// Saturating conversion into 11 bit safe u16 for output
     pub fn to_output(&self) -> u16 {
