@@ -511,6 +511,7 @@ async fn mixer_loop() {
     let mut medium_samples = adpcm_to_stream(&AUDIO_MEDIUM[136 + 8..]);
     let _heavy_samples = adpcm_to_stream(&AUDIO_HEAVY[136 + 8..]);
 
+    let mut intensity_rcv = INTENSITY.anon_receiver();
     let mut saw_value = 0u16;
 
     loop {
@@ -520,7 +521,11 @@ async fn mixer_loop() {
         // down sample from 16 to 12 bit
         sample >>= 4;
         defmt::assert!((-2048..2048).contains(&sample), "12 bit, was: {}", sample);
-        let sample = Sample::from(sample);
+        let mut sample = Sample::from(sample);
+
+        if let Some(intensity) = intensity_rcv.try_get() {
+            sample = sample.scale_inverted(intensity.abs());
+        }
 
         // saw from audio output 2, just because
         saw_value += 8;

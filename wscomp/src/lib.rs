@@ -111,6 +111,19 @@ impl Sample {
     pub fn to_inverted(&self) -> Self {
         Self::new(-self.accumulated_raw, self.inverted_source)
     }
+
+    pub fn abs(self) -> Self {
+        // not expecting values to ever hit i32::MIN, but saturating, just in case
+        Self::new(self.to_clamped().saturating_abs(), self.inverted_source)
+    }
+
+    pub fn scale(&self, other: Self) -> Self {
+        ((self.to_clamped() * other.to_clamped()) / Self::MAX).into()
+    }
+
+    pub fn scale_inverted(&self, other: Self) -> Self {
+        ((self.to_clamped() * (Self::MAX - other.to_clamped())) / Self::MAX).into()
+    }
 }
 
 impl From<i32> for Sample {
