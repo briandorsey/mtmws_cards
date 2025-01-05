@@ -117,12 +117,24 @@ impl Sample {
         Self::new(self.to_clamped().saturating_abs(), self.inverted_source)
     }
 
+    /// Scale this sample to the ratio of another sample to [`MAX`]
+    ///
+    /// Used for mixing, crossfading and attenuverting signals.
     pub fn scale(&self, other: Self) -> Self {
-        ((self.to_clamped() * other.to_clamped()) / Self::MAX).into()
+        Self::new(
+            (self.to_clamped() * other.to_clamped()) / Self::MAX,
+            self.inverted_source,
+        )
     }
 
+    /// Scale this sample to the inverted ratio of another sample to [`MAX`]
+    ///
+    /// Used for mixing, crossfading and attenuverting signals.
     pub fn scale_inverted(&self, other: Self) -> Self {
-        ((self.to_clamped() * (Self::MAX - other.to_clamped())) / Self::MAX).into()
+        Self::new(
+            (self.to_clamped() * (Self::MAX - other.to_clamped())) / Self::MAX,
+            self.inverted_source,
+        )
     }
 }
 
