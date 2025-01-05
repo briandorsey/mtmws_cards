@@ -493,30 +493,36 @@ const AUDIO_HEAVY: &[u8; 50320] = include_bytes!("../data/backyard_rain_heavy_lo
 // const AUDIO_MEDIUM: &[u8; 123024] = include_bytes!("../data/sine_long.wav");
 // const AUDIO_MEDIUM: &[u8; 441488] = include_bytes!("../data/backyard_thunder_01.wav");
 
-fn adpcm_to_stream(data: &[u8]) -> impl Iterator<Item = i16> + use<'_> {
+fn adpcm_to_stream(data: &[u8], sample_offset: usize) -> impl Iterator<Item = i16> + use<'_> {
     const BLOCK_SIZE: usize = 1024;
 
     // IMA ADPCM files are 4 bits per sample, these files have a consistent
     // 1024 byte block size and the WAV DATA chunk starts at byte 136.
     // It would probably be better to actually parse the WAV files if they
     // were updatable... but... they aren't and this works for now.
-    // TODO: Are we leaving unprocessed real data after the last full block?
-    data.chunks_exact(BLOCK_SIZE).cycle().flat_map(|data| {
-        let mut adpcm_output_buffer = [0_i16; 2 * BLOCK_SIZE - 7];
-        decode_adpcm_ima_ms(data, false, &mut adpcm_output_buffer).unwrap();
-        adpcm_output_buffer
-    })
+    // This is ignoring any data after the end of the last full BLOCK_SIZE..
+    // but in theory, IMA ADPCM DATA chunks should be a multiple of BLOCK_SIZE.
+    data.chunks_exact(BLOCK_SIZE)
+        .cycle()
+        .flat_map(|data| {
+            let mut adpcm_output_buffer = [0_i16; 2 * BLOCK_SIZE - 7];
+            decode_adpcm_ima_ms(data, false, &mut adpcm_output_buffer).unwrap();
+            adpcm_output_buffer
+        })
+        .skip(sample_offset)
 }
 
 #[embassy_executor::task]
 async fn mixer_loop() {
     info!("Starting mixer_loop()");
 
-    // Create three iterators which produce full range i16 samples by
-    // decoding the ADPCM blocks and repeatedly cylcing through the data.
-    let mut light_samples = adpcm_to_stream(&AUDIO_LIGHT[136 + 8..]);
-    let mut medium_samples = adpcm_to_stream(&AUDIO_MEDIUM[136 + 8..]);
-    let mut heavy_samples = adpcm_to_stream(&AUDIO_HEAVY[136 + 8..]);
+    // Create three iterators which produce full range i16 samples by decoding
+    // the ADPCM blocks and repeatedly cylcing through the data. Offset the
+    // starting samples with prime numbers, so the three buffers don't run out
+    // and process a full block at the same time.
+    let mut light_samples = adpcm_to_stream(&AUDIO_LIGHT[136 + 8..], 0);
+    let mut medium_samples = adpcm_to_stream(&AUDIO_MEDIUM[136 + 8..], 277);
+    let mut heavy_samples = adpcm_to_stream(&AUDIO_HEAVY[136 + 8..], 691);
 
     let mut intensity_rcv = INTENSITY.anon_receiver();
     let mut saw_value = 0u16;
