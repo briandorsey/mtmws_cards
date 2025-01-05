@@ -26,7 +26,7 @@ use portable_atomic::{AtomicU32, Ordering};
 use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
-use wscomp::{JackSample, Sample};
+use wscomp::{JackSample, Sample, SampleUpdate};
 
 // This is a port of the Backyard Rain Soundscape app from Playdate to the
 // Music Thing Modular Workshop System Computer via Rust & Embassy.
@@ -157,7 +157,7 @@ fn main() -> ! {
         unwrap!(spawner.spawn(periodic_stats()));
         unwrap!(spawner.spawn(mixer_loop()));
         unwrap!(spawner.spawn(logic_loop()));
-        unwrap!(spawner.spawn(update_leds_loop(
+        unwrap!(spawner.spawn(update_pwm_loop(
             p.PWM_SLICE5,
             p.PIN_10,
             p.PIN_11,
@@ -178,16 +178,20 @@ fn main() -> ! {
 async fn logic_loop() {
     info!("Starting logic_loop()");
 
+    // local persistent intensity value, smoothed using Sample.update()
+    let mut smooth_intensity = Sample::from(0_i32);
+
     let intensity_snd = INTENSITY.sender();
     intensity_snd.send(Sample::new(0, false));
 
     let mut mux_rcv = MUX_INPUT.anon_receiver();
 
-    let mut ticker = Ticker::every(Duration::from_hz(60));
+    let mut ticker = Ticker::every(Duration::from_hz(480));
     loop {
         if let Some(mux_state) = mux_rcv.try_get() {
             // map intensity directly to main knob for now
-            intensity_snd.send(mux_state.main_knob);
+            smooth_intensity.update(mux_state.main_knob);
+            intensity_snd.send(smooth_intensity);
         }
         ticker.next().await
     }
@@ -207,7 +211,7 @@ fn set_led(led: &mut pwm::PwmOutput, value: u16) {
 
 #[allow(clippy::too_many_arguments)]
 #[embassy_executor::task]
-async fn update_leds_loop(
+async fn update_pwm_loop(
     led12_pwm_slice: peripherals::PWM_SLICE5,
     led1_pin: peripherals::PIN_10,
     led2_pin: peripherals::PIN_11,
@@ -274,7 +278,7 @@ async fn update_leds_loop(
 
     let mut intensity_rcv = INTENSITY.anon_receiver();
 
-    let mut ticker = Ticker::every(Duration::from_hz(60));
+    let mut ticker = Ticker::every(Duration::from_hz(480));
     loop {
         // LEDs
         // set_led(&mut led1, Sample::from(0_i32).to_output_abs());

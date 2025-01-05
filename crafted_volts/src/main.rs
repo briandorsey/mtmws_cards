@@ -18,7 +18,7 @@ use embassy_time::Timer;
 use gpio::{Level, Output};
 use {defmt_rtt as _, panic_probe as _};
 
-use wscomp::{JackSample, Sample};
+use wscomp::{JackSample, Sample, SampleUpdate};
 
 // This is an attempt to learn how use all inputs & outputs of the Music Thing Modular Workshop System Computer via Rust & Embassy.
 // The card maps knobs and the switch to manually set voltages.

@@ -68,19 +68,6 @@ impl Sample {
         Self::new(output, invert)
     }
 
-    /// Update with new value
-    pub fn update(&mut self, value: u16) {
-        let mut value = i32::from(value);
-        value -= Self::OFFSET;
-        if self.inverted_source {
-            value = -value;
-        }
-        // first-order infinite impulse response filter, logic from:
-        // https://electronics.stackexchange.com/a/176740
-        self.accumulated_raw =
-            (self.accumulated_raw - (self.accumulated_raw >> Self::ACCUM_BITS)) + value;
-    }
-
     /// Saturating conversion into 11 bit safe u16 for output
     pub fn to_output(&self) -> u16 {
         // clamp self, divide by 2 (by shifting right) and convert to u16
@@ -135,6 +122,48 @@ impl Sample {
             (self.to_clamped() * (Self::MAX - other.to_clamped())) / Self::MAX,
             self.inverted_source,
         )
+    }
+}
+
+pub trait SampleUpdate<V> {
+    /// Update with new value
+    fn update(&mut self, value: V);
+}
+
+impl SampleUpdate<u16> for Sample {
+    /// Update with new value from 12 bit u16
+    ///
+    /// Expecting 12 bit number between 0..4096, from various Computer
+    /// analog in pins.
+    fn update(&mut self, value: u16) {
+        let mut value = i32::from(value);
+        value -= Self::OFFSET;
+        if self.inverted_source {
+            value = -value;
+        }
+        // uses i32 implementation for core logic
+        self.update(value);
+    }
+}
+
+impl SampleUpdate<Self> for Sample {
+    /// Update with new value from another [`Sample`]
+    fn update(&mut self, value: Self) {
+        let value = value.to_clamped();
+        // uses i32 implementation for core logic
+        self.update(value);
+    }
+}
+
+impl SampleUpdate<i32> for Sample {
+    /// Update with new value from i32
+    ///
+    /// Unchecked update, assuming value within -2048..2048
+    fn update(&mut self, value: i32) {
+        // first-order infinite impulse response filter, logic from:
+        // https://electronics.stackexchange.com/a/176740
+        self.accumulated_raw =
+            (self.accumulated_raw - (self.accumulated_raw >> Self::ACCUM_BITS)) + value;
     }
 }
 
@@ -239,7 +268,7 @@ impl JackSample {
 #[cfg(test)]
 mod test {
     // Note this useful idiom: importing names from outer (for mod tests) scope.
-    use super::Sample;
+    use super::{Sample, SampleUpdate};
 
     #[test]
     fn test_input_value_basics() {
@@ -319,5 +348,21 @@ mod test {
         assert_eq!(Sample::new(123, false) / 1, Sample::new(123, false));
         assert_eq!(Sample::new(240, false) / 2, Sample::new(120, false));
         assert_eq!(Sample::new(123, false) / -1, Sample::new(-123, false));
+    }
+
+    #[test]
+    fn test_input_value_update() {
+        let mut sample = Sample::from(0_i32);
+        assert_eq!(sample.to_clamped(), 0);
+        sample.update(2048_u16);
+        assert_eq!(sample.to_clamped(), 0);
+        sample.update(0_u16);
+        assert_eq!(sample.to_clamped(), -256);
+        sample.update(0_u16);
+        assert_eq!(sample.to_clamped(), -480);
+        for _ in 0..64 {
+            sample.update(0_u16);
+        }
+        assert_eq!(sample.to_clamped(), Sample::MIN, "should converge to MIN");
     }
 }
