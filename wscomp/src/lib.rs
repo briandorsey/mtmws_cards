@@ -113,6 +113,17 @@ impl Sample {
     }
 }
 
+impl From<i32> for Sample {
+    fn from(value: i32) -> Self {
+        Self::new(value, false)
+    }
+}
+impl From<i16> for Sample {
+    fn from(value: i16) -> Self {
+        Self::new(value.into(), false)
+    }
+}
+
 impl Add for Sample {
     type Output = Self;
 

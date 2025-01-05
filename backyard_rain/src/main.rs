@@ -245,28 +245,28 @@ async fn update_leds_loop(
     let mut ticker = Ticker::every(Duration::from_hz(60));
     loop {
         // LEDs
-        // set_led(&mut led1, Sample::new(0, false).to_output_abs());
-        // set_led(&mut led3, Sample::new(0, false).to_output_abs());
-        // set_led(&mut led5, Sample::new(0, false).to_output_abs());
+        // set_led(&mut led1, Sample::from(0_i32).to_output_abs());
+        // set_led(&mut led3, Sample::from(0_i32).to_output_abs());
+        // set_led(&mut led5, Sample::from(0_i32).to_output_abs());
 
         // right three leds visualize rain intensity
 
         if let Some(intensity) = intensity_rcv.try_get() {
             // led2 represents heavy rain
-            if intensity > Sample::new(0, false) {
+            if intensity > Sample::from(0_i32) {
                 set_led(&mut led2, intensity.to_output_abs());
             } else {
-                set_led(&mut led2, Sample::new(0, false).to_output_abs());
+                set_led(&mut led2, Sample::from(0_i32).to_output_abs());
             }
 
             // led4 represents medium rain
             set_led(&mut led4, intensity.to_output_abs_inverted());
 
             // led 6 represents light rain
-            if intensity < Sample::new(0, false) {
+            if intensity < Sample::from(0_i32) {
                 set_led(&mut led6, intensity.to_output_abs());
             } else {
-                set_led(&mut led6, Sample::new(0, false).to_output_abs());
+                set_led(&mut led6, Sample::from(0_i32).to_output_abs());
             }
         }
 
@@ -516,28 +516,11 @@ async fn mixer_loop() {
     loop {
         let mut sample = medium_samples
             .next()
-            .expect("iterator over cycle returned None somehow?!?!");
+            .expect("iterator over cycle() returned None somehow?!?!");
         // down sample from 16 to 12 bit
         sample >>= 4;
         defmt::assert!((-2048..2048).contains(&sample), "12 bit, was: {}", sample);
-        // down sample 1 more bit to 11 bit
-        sample >>= 1;
-        defmt::assert!((-1024..1024).contains(&sample), "11 bit, was: {}", sample);
-        // convert to u16
-        let mut sample: u16 = if sample > 0 {
-            sample as u16 + 1024u16
-        } else {
-            (sample + 1024) as u16
-        };
-        defmt::assert!((0..2048).contains(&sample), "11 bit u16, was: {}", sample);
-        // 11 bit invert
-        sample = 2047 - sample;
-        // clear the left four bits
-        sample = (sample << 4) >> 4;
-        defmt::assert!(sample <= 2047, "was: {}", sample);
-        // manually handling samples above... consider using Sample
-        // let sample = Sample::from_i16(sample, false);
-        // dac_buffer = (sample.to_output_inverted() | dac_config_a).to_be_bytes();
+        let sample = Sample::from(sample);
 
         // saw from audio output 2, just because
         saw_value += 8;
@@ -545,7 +528,7 @@ async fn mixer_loop() {
             saw_value = 0
         };
 
-        let dac_sample = DACSamplePair::new(sample, saw_value);
+        let dac_sample = DACSamplePair::new(sample.to_output(), saw_value);
 
         // push samples until channel full then block the loop
         AUDIO_OUT_SAMPLES.send(dac_sample).await;
