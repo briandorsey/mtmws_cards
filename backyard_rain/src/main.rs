@@ -474,13 +474,20 @@ impl DACSamplePair {
     }
 }
 
-const AUDIO_HEAVY: &[u8; 12432] = include_bytes!("../data/sine_heavy.wav");
-// const AUDIO_HEAVY: &[u8; 4034704] = include_bytes!("../data/backyard_rain_heavy_loop.wav");
-const AUDIO_MEDIUM: &[u8; 12432] = include_bytes!("../data/sine_medium.wav");
+// const AUDIO_LIGHT: &[u8; 12432] = include_bytes!("../data/sine_light.wav");
+const AUDIO_LIGHT: &[u8; 50320] = include_bytes!("../data/backyard_rain_light_loop_micro.wav");
+// const AUDIO_LIGHT: &[u8; 664720] = include_bytes!("../data/backyard_rain_light_loop_short.wav");
+// const AUDIO_LIGHT: &[u8; 4677776] = include_bytes!("../data/backyard_rain_light_loop.wav");
+
+// const AUDIO_MEDIUM: &[u8; 12432] = include_bytes!("../data/sine_medium.wav");
+const AUDIO_MEDIUM: &[u8; 50320] = include_bytes!("../data/backyard_rain_medium_loop_micro.wav");
+// const AUDIO_MEDIUM: &[u8; 664720] = include_bytes!("../data/backyard_rain_medium_loop_short.wav");
 // const AUDIO_MEDIUM: &[u8; 7409808] = include_bytes!("../data/backyard_rain_medium_loop.wav");
 
-const AUDIO_LIGHT: &[u8; 12432] = include_bytes!("../data/sine_light.wav");
-// const AUDIO_LIGHT: &[u8; 4677776] = include_bytes!("../data/backyard_rain_light_loop.wav");
+// const AUDIO_HEAVY: &[u8; 12432] = include_bytes!("../data/sine_heavy.wav");
+const AUDIO_HEAVY: &[u8; 50320] = include_bytes!("../data/backyard_rain_heavy_loop_micro.wav");
+// const AUDIO_HEAVY: &[u8; 664720] = include_bytes!("../data/backyard_rain_heavy_loop_short.wav");
+// const AUDIO_HEAVY: &[u8; 4034704] = include_bytes!("../data/backyard_rain_heavy_loop.wav");
 
 // alternates for testing
 // const AUDIO_MEDIUM: &[u8; 123024] = include_bytes!("../data/sine_long.wav");
@@ -507,24 +514,46 @@ async fn mixer_loop() {
 
     // Create three iterators which produce full range i16 samples by
     // decoding the ADPCM blocks and repeatedly cylcing through the data.
-    let _light_samples = adpcm_to_stream(&AUDIO_LIGHT[136 + 8..]);
+    let mut light_samples = adpcm_to_stream(&AUDIO_LIGHT[136 + 8..]);
     let mut medium_samples = adpcm_to_stream(&AUDIO_MEDIUM[136 + 8..]);
-    let _heavy_samples = adpcm_to_stream(&AUDIO_HEAVY[136 + 8..]);
+    let mut heavy_samples = adpcm_to_stream(&AUDIO_HEAVY[136 + 8..]);
 
     let mut intensity_rcv = INTENSITY.anon_receiver();
     let mut saw_value = 0u16;
 
+    // TODO: need to smooth intensity changes over time
+    // let mut counter = 0_isize;
+
     loop {
-        let mut sample = medium_samples
+        let mut light = light_samples
             .next()
             .expect("iterator over cycle() returned None somehow?!?!");
         // down sample from 16 to 12 bit
-        sample >>= 4;
-        defmt::assert!((-2048..2048).contains(&sample), "12 bit, was: {}", sample);
-        let mut sample = Sample::from(sample);
+        light >>= 4;
+        let light = Sample::from(light);
 
+        let mut medium = medium_samples
+            .next()
+            .expect("iterator over cycle() returned None somehow?!?!");
+        // down sample from 16 to 12 bit
+        medium >>= 4;
+        let medium = Sample::from(medium);
+
+        let mut heavy = heavy_samples
+            .next()
+            .expect("iterator over cycle() returned None somehow?!?!");
+        // down sample from 16 to 12 bit
+        heavy >>= 4;
+        let heavy = Sample::from(heavy);
+
+        let mut mixed = medium;
         if let Some(intensity) = intensity_rcv.try_get() {
-            sample = sample.scale_inverted(intensity.abs());
+            match intensity {
+                intensity if intensity >= Sample::from(0_i32) => {
+                    mixed = medium.scale_inverted(intensity) + heavy.scale(intensity)
+                }
+                _ => mixed = medium.scale_inverted(intensity.abs()) + light.scale(intensity.abs()),
+            }
         }
 
         // saw from audio output 2, just because
@@ -533,7 +562,12 @@ async fn mixer_loop() {
             saw_value = 0
         };
 
-        let dac_sample = DACSamplePair::new(sample.to_output(), saw_value);
+        let dac_sample = DACSamplePair::new(mixed.to_output(), saw_value);
+
+        // counter += 1;
+        // if counter % 2_isize.pow(15) == 0 {
+        //     info!("free_capacity(): {}", AUDIO_OUT_SAMPLES.free_capacity());
+        // }
 
         // push samples until channel full then block the loop
         AUDIO_OUT_SAMPLES.send(dac_sample).await;
