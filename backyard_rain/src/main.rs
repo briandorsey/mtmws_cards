@@ -167,6 +167,9 @@ fn main() -> ! {
             p.PWM_SLICE7,
             p.PIN_14,
             p.PIN_15,
+            p.PWM_SLICE3,
+            p.PIN_23,
+            p.PIN_22,
         )));
     })
 }
@@ -214,6 +217,9 @@ async fn update_leds_loop(
     led56_pwm_slice: peripherals::PWM_SLICE7,
     led5_pin: peripherals::PIN_14,
     led6_pin: peripherals::PIN_15,
+    cv_pwm_slice: peripherals::PWM_SLICE3,
+    cv1_pin: peripherals::PIN_23,
+    cv2_pin: peripherals::PIN_22,
 ) {
     info!("Starting update_leds_loop()");
 
@@ -237,6 +243,32 @@ async fn update_leds_loop(
     let pwm7 = pwm::Pwm::new_output_ab(led56_pwm_slice, led5_pin, led6_pin, led_pwm_config.clone());
     let (Some(_led5), Some(mut led6)) = pwm7.split() else {
         error!("Error setting up LED PWM channels for 5 & 6");
+        return;
+    };
+
+    // CV setup
+    // If we aim for a specific frequency, here is how we can calculate the top value.
+    // The top value sets the period of the PWM cycle, so a counter goes from 0 to top and then wraps around to 0.
+    // Every such wraparound is one PWM cycle. So here is how we get 60KHz:
+    // 60khz target from Computer docs
+    let desired_freq_hz = 60_000;
+    let clock_freq_hz = embassy_rp::clocks::clk_sys_freq();
+    let divider = 16u8;
+    let period = (clock_freq_hz / (desired_freq_hz * divider as u32)) as u16 - 1;
+
+    // CV PWM setup
+    // Inverted PWM output. Two pole active filtered. Use 11 bit PWM at 60khz.
+    // 2047 = -6v
+    // 1024 =  0v
+    // 0    = +6v
+    let mut cv_pwm_config = pwm::Config::default();
+    cv_pwm_config.top = period;
+    cv_pwm_config.divider = divider.into();
+
+    let pwm3 = pwm::Pwm::new_output_ab(cv_pwm_slice, cv2_pin, cv1_pin, cv_pwm_config.clone());
+    // Yes, cv_2_pwm has the lower GPIO pin.
+    let (Some(_cv2_pwm), Some(mut cv1_pwm)) = pwm3.split() else {
+        error!("Error setting up CV PWM channels");
         return;
     };
 
@@ -268,6 +300,16 @@ async fn update_leds_loop(
             } else {
                 set_led(&mut led6, Sample::from(0_i32).to_output_abs());
             }
+
+            // set CV1 to intensity
+            cv1_pwm
+                .set_duty_cycle_fraction(intensity.to_output_inverted(), 2047)
+                .unwrap_or_else(|_| {
+                    error!(
+                        "error setting CV1 PWM to : {}",
+                        intensity.to_output_inverted()
+                    )
+                });
         }
 
         ticker.next().await
@@ -602,13 +644,14 @@ async fn sample_write_loop(
     let mut local_max_ticks = 0u32;
     let mut previous_loop_end = Instant::now();
 
+    // pulse setup
     let mut pulse1 = Output::new(pulse1_pin, Level::High);
     let mut pulse2 = Output::new(pulse2_pin, Level::High);
 
+    // DAC setup
     let mut config = spi::Config::default();
     config.frequency = 8_000_000;
 
-    // DAC setup
     let mut spi = spi::Spi::new_txonly(spi0, clk, mosi, dma0, config);
     let mut cs = Output::new(cs_pin, Level::High);
 
