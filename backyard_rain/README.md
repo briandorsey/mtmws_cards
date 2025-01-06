@@ -23,7 +23,8 @@ Audio input  1: (if any) is mixed with Main knob position, Main knob acts as
                 offset to incomming signal.
 
 CV output 1   : Current intensity value as CV, about -6v to +6v
-CV output 2   : 
+CV output 2   : Very slow triangle LFO, also mixed with intensity unless Audio
+                input 1 is used.
 
 Pulse output 1: Debugging output for now. Safe to ignore. Toggled at the
                 beginning of every loop of sample_write_loop(). (so it should be

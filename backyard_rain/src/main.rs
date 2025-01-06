@@ -60,6 +60,9 @@ static MUX_INPUT: Watch<CriticalSectionRawMutex, MuxState, 2> = Watch::new();
 /// Sample::MIN = 100% light rain
 /// ```
 static INTENSITY: Watch<CriticalSectionRawMutex, Sample, 2> = Watch::new();
+
+/// Slow LFO for modulating intensity
+static LFO: Watch<CriticalSectionRawMutex, Sample, 2> = Watch::new();
 static AUDIO_INPUT: Watch<CriticalSectionRawMutex, AudioState, 2> = Watch::new();
 static AUDIO_OUT_SAMPLES: Channel<CriticalSectionRawMutex, DACSamplePair, 1024> = Channel::new();
 
@@ -196,6 +199,29 @@ fn main() -> ! {
     })
 }
 
+/// Triangle wave - hardcoded for default intensity modulation
+struct TriangleWave11 {
+    value: i16,
+}
+
+impl TriangleWave11 {
+    pub fn new() -> Self {
+        TriangleWave11 { value: 0 }
+    }
+
+    pub fn tick(&mut self) {
+        // wrap at 11bit MIN so abs() is never more than positive 11bit value
+        if self.value <= -2_i16.pow(11) {
+            self.value = 2_i16.pow(11) - 1
+        }
+        self.value -= 1;
+    }
+
+    pub fn current(&self) -> Sample {
+        Sample::from((self.value.abs() - 2_i16.pow(10)) / 2)
+    }
+}
+
 #[embassy_executor::task]
 async fn logic_loop() {
     info!("Starting logic_loop()");
@@ -206,11 +232,25 @@ async fn logic_loop() {
     let intensity_snd = INTENSITY.sender();
     intensity_snd.send(Sample::new(0, false));
 
+    let mut lfo = TriangleWave11::new();
+    let lfo_snd = LFO.sender();
+    lfo_snd.send(lfo.current());
+
     let mut mux_rcv = MUX_INPUT.anon_receiver();
     let mut audio_rcv = AUDIO_INPUT.anon_receiver();
 
+    let mut counter = 0_usize;
     let mut ticker = Ticker::every(Duration::from_hz(480));
     loop {
+        counter = counter.wrapping_add(1);
+
+        // update LFO slowly
+        if counter % 2_usize.pow(6) == 0 {
+            lfo.tick();
+            lfo_snd.send(lfo.current());
+        }
+
+        // update intensity
         if let Some(mux_state) = mux_rcv.try_get() {
             // map intensity directly to main knob to start
             let mut intensity = mux_state.main_knob;
@@ -219,14 +259,11 @@ async fn logic_loop() {
                 // If cable plugged into audio1 input, then offset that signal
                 if let Some(input) = audio_state.audio1.plugged_value() {
                     intensity = *input + intensity;
+                } else {
+                    // offset by the internal LFO
+                    intensity = lfo.current() + intensity;
                 }
             }
-            // if let Some(audio_state) = audio_rcv.try_get() {
-            //     // If cable plugged into audio1 input, then attenuvert that signal
-            //     if let Some(input) = audio_state.audio1.plugged_value() {
-            //         intensity = (*input * intensity) / Sample::OFFSET;
-            //     }
-            // }
 
             smooth_intensity.update(intensity);
             intensity_snd.send(smooth_intensity);
@@ -309,12 +346,13 @@ async fn update_pwm_loop(
 
     let pwm3 = pwm::Pwm::new_output_ab(cv_pwm_slice, cv2_pin, cv1_pin, cv_pwm_config.clone());
     // Yes, cv_2_pwm has the lower GPIO pin.
-    let (Some(_cv2_pwm), Some(mut cv1_pwm)) = pwm3.split() else {
+    let (Some(mut cv2_pwm), Some(mut cv1_pwm)) = pwm3.split() else {
         error!("Error setting up CV PWM channels");
         return;
     };
 
     let mut intensity_rcv = INTENSITY.anon_receiver();
+    let mut lfo_rcv = LFO.anon_receiver();
 
     let mut ticker = Ticker::every(Duration::from_hz(480));
     loop {
@@ -352,6 +390,15 @@ async fn update_pwm_loop(
                         intensity.to_output_inverted()
                     )
                 });
+
+            // set CV2 to LFO value
+            if let Some(lfo) = lfo_rcv.try_get() {
+                cv2_pwm
+                    .set_duty_cycle_fraction(lfo.to_output_inverted(), 2047)
+                    .unwrap_or_else(|_| {
+                        error!("error setting CV2 PWM to : {}", lfo.to_output_inverted())
+                    });
+            };
         }
 
         ticker.next().await
