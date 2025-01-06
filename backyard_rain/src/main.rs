@@ -610,7 +610,7 @@ async fn periodic_stats() {
         debug!("current_audio_counter: {}", current_audio_counter);
         if let Some(mux_state) = mux_rcv.try_get() {
             info!(
-                "rates: main: {}, audio: {} per sec, max: {}",
+                "rates: input: {}, audio: {} per sec, max: {}",
                 mux_state.sequence_counter - last_sequence,
                 current_audio_counter - last_audio_counter,
                 AUDIO_MAX_TICKS.load(Ordering::Relaxed),
@@ -654,22 +654,41 @@ impl DACSamplePair {
 
 // const AUDIO_LIGHT: &[u8; 12432] = include_bytes!("../data/sine_light.wav");
 const AUDIO_LIGHT: &[u8; 50320] = include_bytes!("../data/backyard_rain_light_loop_micro.wav");
-// const AUDIO_LIGHT: &[u8; 664720] = include_bytes!("../data/backyard_rain_light_loop_short.wav");
-// const AUDIO_LIGHT: &[u8; 4677776] = include_bytes!("../data/backyard_rain_light_loop.wav");
+// const AUDIO_LIGHT: &[u8; 461844] = include_bytes!("../data/backyard_rain_light_loop_short.wav");
+// const AUDIO_LIGHT: &[u8; 4696052] = include_bytes!("../data/backyard_rain_light_loop.wav");
 
 // const AUDIO_MEDIUM: &[u8; 12432] = include_bytes!("../data/sine_medium.wav");
 const AUDIO_MEDIUM: &[u8; 50320] = include_bytes!("../data/backyard_rain_medium_loop_micro.wav");
-// const AUDIO_MEDIUM: &[u8; 664720] = include_bytes!("../data/backyard_rain_medium_loop_short.wav");
-// const AUDIO_MEDIUM: &[u8; 7409808] = include_bytes!("../data/backyard_rain_medium_loop.wav");
+// const AUDIO_MEDIUM: &[u8; 1067054] = include_bytes!("../data/backyard_rain_medium_loop_short.wav");
+// const AUDIO_MEDIUM: &[u8; 7428102] = include_bytes!("../data/backyard_rain_medium_loop.wav");
 
 // const AUDIO_HEAVY: &[u8; 12432] = include_bytes!("../data/sine_heavy.wav");
 const AUDIO_HEAVY: &[u8; 50320] = include_bytes!("../data/backyard_rain_heavy_loop_micro.wav");
-// const AUDIO_HEAVY: &[u8; 664720] = include_bytes!("../data/backyard_rain_heavy_loop_short.wav");
-// const AUDIO_HEAVY: &[u8; 4034704] = include_bytes!("../data/backyard_rain_heavy_loop.wav");
+// const AUDIO_HEAVY: &[u8; 482464] = include_bytes!("../data/backyard_rain_heavy_loop_short.wav");
+// const AUDIO_HEAVY: &[u8; 4053120] = include_bytes!("../data/backyard_rain_heavy_loop.wav");
 
 // alternates for testing
 // const AUDIO_MEDIUM: &[u8; 123024] = include_bytes!("../data/sine_long.wav");
-// const AUDIO_MEDIUM: &[u8; 441488] = include_bytes!("../data/backyard_thunder_01.wav");
+
+/// A very simplistic WAVE parser, returns slice of samples in DATA chunk
+///
+/// Assumes DATA chunk starts at offset 136, which is true for these specific files.
+/// Will panic if DATA not found.
+fn data_chunk(wav: &[u8]) -> &[u8] {
+    let mut offset = 12;
+    loop {
+        let chunk = &wav[offset..offset + 4];
+        let mut length_bytes = [0_u8; 4];
+        length_bytes.clone_from_slice(&wav[offset + 4..offset + 8]);
+        let length = u32::from_le_bytes(length_bytes) as usize;
+        if b"data" != chunk {
+            offset += length + 8;
+            continue;
+        }
+        info!("WAV DATA offset, size: {}, {}", offset, length);
+        return &wav[offset + 8..length];
+    }
+}
 
 fn adpcm_to_stream(data: &[u8], sample_offset: usize) -> impl Iterator<Item = i16> + use<'_> {
     const BLOCK_SIZE: usize = 1024;
@@ -680,7 +699,8 @@ fn adpcm_to_stream(data: &[u8], sample_offset: usize) -> impl Iterator<Item = i1
     // were updatable... but... they aren't and this works for now.
     // This is ignoring any data after the end of the last full BLOCK_SIZE..
     // but in theory, IMA ADPCM DATA chunks should be a multiple of BLOCK_SIZE.
-    data.chunks_exact(BLOCK_SIZE)
+    data_chunk(data)
+        .chunks_exact(BLOCK_SIZE)
         .cycle()
         .flat_map(|data| {
             let mut adpcm_output_buffer = [0_i16; 2 * BLOCK_SIZE - 7];
@@ -698,9 +718,9 @@ async fn mixer_loop() {
     // the ADPCM blocks and repeatedly cylcing through the data. Offset the
     // starting samples with prime numbers, so the three buffers don't run out
     // and process a full block at the same time.
-    let mut light_samples = adpcm_to_stream(&AUDIO_LIGHT[136 + 8..], 0);
-    let mut medium_samples = adpcm_to_stream(&AUDIO_MEDIUM[136 + 8..], 277);
-    let mut heavy_samples = adpcm_to_stream(&AUDIO_HEAVY[136 + 8..], 691);
+    let mut light_samples = adpcm_to_stream(AUDIO_LIGHT, 0);
+    let mut medium_samples = adpcm_to_stream(AUDIO_MEDIUM, 277);
+    let mut heavy_samples = adpcm_to_stream(AUDIO_HEAVY, 691);
 
     let mut intensity_rcv = INTENSITY.anon_receiver();
     let mut saw_value = 0u16;
