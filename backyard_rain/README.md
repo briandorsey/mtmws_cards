@@ -23,8 +23,8 @@ Audio input  1: (if any) is mixed with Main knob position, Main knob acts as
                 offset to incomming signal.
 
 CV output 1   : Current intensity value as CV, about -6v to +6v
-CV output 2   : Very slow triangle LFO, also mixed with intensity unless Audio
-                input 1 is used.
+CV output 2   : Very slow triangle LFO, at ~25% amplitude, also mixed with
+                intensity unless Audio input 1 is used.
 
 Pulse output 1: Debugging output for now. Safe to ignore. Toggled at the
                 beginning of every loop of sample_write_loop(). (so it should be
@@ -32,6 +32,14 @@ Pulse output 1: Debugging output for now. Safe to ignore. Toggled at the
 Pulse output 2: Debugging output for now. Safe to ignore. Set high during the
                 working loop of sample_write_loop(), so duty cycle should be how
                 much of the current cycle is used by the CPU.
+
+LEDs: 1  2
+      3  4
+      5  6
+
+1, 3, & 5     : Intensity & crossfade visualization. Top LED is heavy rain, then
+                medium, and bottom is light rain. Dark = 0% mix. 
+4             : Internal slow triangle LFO. Dark = -6v (moves very slowly)
 ```
 
 Recording info:

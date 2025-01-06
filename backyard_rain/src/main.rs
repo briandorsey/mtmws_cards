@@ -218,6 +218,8 @@ impl TriangleWave11 {
     }
 
     pub fn current(&self) -> Sample {
+        // TODO: troubleshoot, doesn't seem to be as smooth as it should be when
+        // mapped to pitch. Also "flickers" at transition occasionally.
         Sample::from((self.value.abs() - 2_i16.pow(10)) / 2)
     }
 }
@@ -308,19 +310,19 @@ async fn update_pwm_loop(
     led_pwm_config.top = 20470;
 
     let pwm5 = pwm::Pwm::new_output_ab(led12_pwm_slice, led1_pin, led2_pin, led_pwm_config.clone());
-    let (Some(_led1), Some(mut led2)) = pwm5.split() else {
+    let (Some(mut led1), Some(_led2)) = pwm5.split() else {
         error!("Error setting up LED PWM channels for 1 & 2");
         return;
     };
 
     let pwm6 = pwm::Pwm::new_output_ab(led34_pwm_slice, led3_pin, led4_pin, led_pwm_config.clone());
-    let (Some(_led3), Some(mut led4)) = pwm6.split() else {
+    let (Some(mut led3), Some(mut led4)) = pwm6.split() else {
         error!("Error setting up LED PWM channels for 3 & 4");
         return;
     };
 
     let pwm7 = pwm::Pwm::new_output_ab(led56_pwm_slice, led5_pin, led6_pin, led_pwm_config.clone());
-    let (Some(_led5), Some(mut led6)) = pwm7.split() else {
+    let (Some(mut led5), Some(_led6)) = pwm7.split() else {
         error!("Error setting up LED PWM channels for 5 & 6");
         return;
     };
@@ -361,24 +363,24 @@ async fn update_pwm_loop(
         // set_led(&mut led3, Sample::from(0_i32).to_output_abs());
         // set_led(&mut led5, Sample::from(0_i32).to_output_abs());
 
-        // right three leds visualize rain intensity
+        // left three leds visualize rain intensity
 
         if let Some(intensity) = intensity_rcv.try_get() {
             // led2 represents heavy rain
             if intensity > Sample::from(0_i32) {
-                set_led(&mut led2, intensity.to_output_abs());
+                set_led(&mut led1, intensity.to_output_abs());
             } else {
-                set_led(&mut led2, Sample::from(0_i32).to_output_abs());
+                set_led(&mut led1, Sample::from(0_i32).to_output_abs());
             }
 
             // led4 represents medium rain
-            set_led(&mut led4, intensity.to_output_abs_inverted());
+            set_led(&mut led3, intensity.to_output_abs_inverted());
 
             // led 6 represents light rain
             if intensity < Sample::from(0_i32) {
-                set_led(&mut led6, intensity.to_output_abs());
+                set_led(&mut led5, intensity.to_output_abs());
             } else {
-                set_led(&mut led6, Sample::from(0_i32).to_output_abs());
+                set_led(&mut led5, Sample::from(0_i32).to_output_abs());
             }
 
             // set CV1 to intensity
@@ -391,8 +393,9 @@ async fn update_pwm_loop(
                     )
                 });
 
-            // set CV2 to LFO value
+            // set CV2 and LED4 to LFO value
             if let Some(lfo) = lfo_rcv.try_get() {
+                set_led(&mut led4, lfo.to_output());
                 cv2_pwm
                     .set_duty_cycle_fraction(lfo.to_output_inverted(), 2047)
                     .unwrap_or_else(|_| {
