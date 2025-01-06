@@ -10,6 +10,28 @@ Nature soundscape audio. A cozy rain ambience mix for background listening. You 
 
 *"It's such a cozy little app."* -- my brother
 
+```text
+This card crossfades between three loops of recorded rain. Heavy, medium, and
+light rain. The current crossfade is "intensity", and intensity controlled with
+the Main knob. Where max is full heavy, center is full medium, min is fully
+light, and every point in between is a cross fade between two recordings. For
+example, halfway between center and max would be a 50/50 mix of medium and heavy
+rain.
+
+Audio output 1: Backyard rain audio. Main knob position mapped to intensity.
+Audio input  1: (if any) is attenuverted based on Main knob position.
+
+CV output 1   : Current intensity value as CV, about -6v to +6v
+CV output 2   : 
+
+Pulse output 1: Debugging output for now. Safe to ignore. Toggled at the
+                beginning of every loop of sample_write_loop(). (so it should be
+                1/2 of the sample rate (1/2 of 48k per second)
+Pulse output 2: Debugging output for now. Safe to ignore. Set high during the
+                working loop of sample_write_loop(), so duty cycle should be how
+                much of the current cycle is used by the CPU.
+```
+
 Recording info:
 
 * LOM Uši omni microphones, separated by about 1.5m (5ft)

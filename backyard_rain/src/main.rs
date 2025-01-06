@@ -60,7 +60,7 @@ static MUX_INPUT: Watch<CriticalSectionRawMutex, MuxState, 2> = Watch::new();
 /// Sample::MIN = 100% light rain
 /// ```
 static INTENSITY: Watch<CriticalSectionRawMutex, Sample, 2> = Watch::new();
-// static AUDIO_INPUT: Watch<CriticalSectionRawMutex, AudioState, 2> = Watch::new();
+static AUDIO_INPUT: Watch<CriticalSectionRawMutex, AudioState, 2> = Watch::new();
 static AUDIO_OUT_SAMPLES: Channel<CriticalSectionRawMutex, DACSamplePair, 1024> = Channel::new();
 
 /// The state of the three position Z switch
@@ -111,6 +111,28 @@ impl MuxState {
     }
 }
 
+/// State of audio inputs collected via direct ADC read.
+#[derive(Clone, Format)]
+struct AudioState {
+    audio1: JackSample,
+    audio2: JackSample,
+}
+
+impl AudioState {
+    fn default() -> Self {
+        AudioState {
+            audio1: JackSample::new(
+                Sample::new(Sample::CENTER, true),
+                Sample::new(Sample::CENTER, true),
+            ),
+            audio2: JackSample::new(
+                Sample::new(Sample::CENTER, true),
+                Sample::new(Sample::CENTER, true),
+            ),
+        }
+    }
+}
+
 static EXECUTOR1: StaticCell<Executor> = StaticCell::new();
 static mut CORE1_STACK: Stack<{ 1024 * 16 }> = Stack::new();
 // static EXECUTOR_HIGH: InterruptExecutor = InterruptExecutor::new();
@@ -152,7 +174,7 @@ fn main() -> ! {
     let executor = EXECUTOR_DEFAULT.init(Executor::new());
     executor.run(|spawner| {
         unwrap!(spawner.spawn(input_loop(
-            p.PIN_4, p.PIN_24, p.PIN_25, p.ADC, p.PIN_28, p.PIN_29,
+            p.PIN_4, p.PIN_24, p.PIN_25, p.ADC, p.PIN_28, p.PIN_29, p.PIN_27, p.PIN_26,
         )));
         unwrap!(spawner.spawn(periodic_stats()));
         unwrap!(spawner.spawn(mixer_loop()));
@@ -185,12 +207,22 @@ async fn logic_loop() {
     intensity_snd.send(Sample::new(0, false));
 
     let mut mux_rcv = MUX_INPUT.anon_receiver();
+    let mut audio_rcv = AUDIO_INPUT.anon_receiver();
 
     let mut ticker = Ticker::every(Duration::from_hz(480));
     loop {
         if let Some(mux_state) = mux_rcv.try_get() {
-            // map intensity directly to main knob for now
-            smooth_intensity.update(mux_state.main_knob);
+            // map intensity directly to main knob to start
+            let mut intensity = mux_state.main_knob;
+
+            if let Some(audio_state) = audio_rcv.try_get() {
+                // If cable plugged into audio1 input, then attenuvert that signal
+                if let Some(input) = audio_state.audio1.plugged_value() {
+                    intensity = (*input * intensity) / Sample::OFFSET;
+                }
+            }
+
+            smooth_intensity.update(intensity);
             intensity_snd.send(smooth_intensity);
         }
         ticker.next().await
@@ -321,6 +353,7 @@ async fn update_pwm_loop(
 }
 
 // this loop should probably be moved into a shared library
+#[allow(clippy::too_many_arguments)]
 #[embassy_executor::task]
 async fn input_loop(
     probe_pin: peripherals::PIN_4,
@@ -329,11 +362,19 @@ async fn input_loop(
     p_adc: peripherals::ADC,
     mux_io_1_pin: peripherals::PIN_28,
     mux_io_2_pin: peripherals::PIN_29,
+    audio1_pin: peripherals::PIN_27,
+    audio2_pin: peripherals::PIN_26,
 ) {
     info!("Starting input_loop()");
 
     // Normalization probe
     let mut probe = Output::new(probe_pin, Level::Low);
+
+    // audio input setup (used for CV in this card)
+    let mut audio1 = adc::Channel::new_pin(audio1_pin, gpio::Pull::None);
+    let mut audio2 = adc::Channel::new_pin(audio2_pin, gpio::Pull::None);
+    let mut audio_state = AudioState::default();
+    let audio_snd = AUDIO_INPUT.sender();
 
     // Set mux to read switch Z
     let mut muxlogic_a = Output::new(muxlogic_a_pin, Level::Low);
@@ -352,6 +393,40 @@ async fn input_loop(
     // read from physical knobs, inputs and switch, write to `mux_state`
     loop {
         mux_state.sequence_counter = mux_state.sequence_counter.wrapping_add(1);
+
+        // read audio inputs and normalization probe input
+        match adc_device.read(&mut audio1).await {
+            Ok(level) => {
+                audio_state.audio1.raw.update(level);
+                // info!("audio1: {}, {}", level, mux_state.audio1.to_output());
+            }
+            Err(e) => error!("ADC read failed, while reading audio1: {}", e),
+        };
+        match adc_device.read(&mut audio2).await {
+            Ok(level) => {
+                audio_state.audio2.raw.update(level);
+                // info!("audio2: {}, {}", level, mux_state.audio2.to_output());
+            }
+            Err(e) => error!("ADC read failed, while reading audio2: {}", e),
+        };
+
+        probe.set_high();
+        Timer::after_micros(mux_settle_micros).await;
+        match adc_device.read(&mut audio1).await {
+            Ok(level) => {
+                audio_state.audio1.probe.update(level);
+                // info!("audio1: {}, {}", level, mux_state.audio1.to_output());
+            }
+            Err(e) => error!("ADC read failed, while reading audio1: {}", e),
+        };
+        match adc_device.read(&mut audio2).await {
+            Ok(level) => {
+                audio_state.audio2.probe.update(level);
+                // info!("audio2: {}, {}", level, mux_state.audio2.to_output());
+            }
+            Err(e) => error!("ADC read failed, while reading audio2: {}", e),
+        };
+        probe.set_low();
 
         // read Main knob & cv1
         muxlogic_a.set_low();
@@ -455,6 +530,7 @@ async fn input_loop(
             Err(e) => error!("ADC read failed, while reading Z: {}", e),
         };
 
+        audio_snd.send(audio_state.clone());
         mux_snd.send(mux_state.clone());
 
         ticker.next().await;
