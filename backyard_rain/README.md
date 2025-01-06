@@ -19,7 +19,8 @@ example, halfway between center and max would be a 50/50 mix of medium and heavy
 rain.
 
 Audio output 1: Backyard rain audio. Main knob position mapped to intensity.
-Audio input  1: (if any) is attenuverted based on Main knob position.
+Audio input  1: (if any) is mixed with Main knob position, Main knob acts as
+                offset to incomming signal.
 
 CV output 1   : Current intensity value as CV, about -6v to +6v
 CV output 2   : 

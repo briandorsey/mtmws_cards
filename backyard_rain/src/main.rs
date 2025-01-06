@@ -216,11 +216,17 @@ async fn logic_loop() {
             let mut intensity = mux_state.main_knob;
 
             if let Some(audio_state) = audio_rcv.try_get() {
-                // If cable plugged into audio1 input, then attenuvert that signal
+                // If cable plugged into audio1 input, then offset that signal
                 if let Some(input) = audio_state.audio1.plugged_value() {
-                    intensity = (*input * intensity) / Sample::OFFSET;
+                    intensity = *input + intensity;
                 }
             }
+            // if let Some(audio_state) = audio_rcv.try_get() {
+            //     // If cable plugged into audio1 input, then attenuvert that signal
+            //     if let Some(input) = audio_state.audio1.plugged_value() {
+            //         intensity = (*input * intensity) / Sample::OFFSET;
+            //     }
+            // }
 
             smooth_intensity.update(intensity);
             intensity_snd.send(smooth_intensity);
