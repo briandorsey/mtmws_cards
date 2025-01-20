@@ -10,6 +10,8 @@ Nature soundscape audio. A cozy rain ambience mix for background listening. You 
 
 *"It's such a cozy little app."* -- my brother
 
+<img src="BR_quickref.png" width="210px">
+
 ```text
 This card crossfades between three loops of recorded rain. Heavy, medium, and
 light rain. The current crossfade is "intensity", and intensity controlled with
