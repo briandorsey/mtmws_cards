@@ -18,20 +18,14 @@ critical-section = "1.1"
 panic-probe = { version = "0.3", features = ["print-defmt"] }
 portable-atomic = { version = "1.10.0", features = ["critical-section"] }
 
-# unfortunately, embassy-rp only recently added pwm::SetDutyCycle and it's
-# not in the released embassy-rp 0.2.0, so a local checkout of embassy is
-# needed until a new release of embassy-rp. (or more likely, there is a better
-# workaround with embedded-hal? But I gave up after a few hours of fiddling.)
-# TODO: replace these local path entries once a new version of embassy-rp is
-# released
-embassy-embedded-hal = { version = "0.2.0", path = "../../embassy/embassy-embedded-hal", features = ["defmt"] }
-embassy-rp = { version = "0.2.0", path = "../../embassy/embassy-rp", features = ["defmt", "unstable-pac", "time-driver", "critical-section-impl", "rp2040"] }
-embassy-time = { version = "0.3.2", path = "../../embassy/embassy-time", features = ["defmt"] }
-embassy-sync = { version = "0.6.1", features = ["defmt"] }
-embassy-executor = { version = "0.6.3", path = "../../embassy/embassy-executor", features = ["defmt", "task-arena-size-98304", "arch-cortex-m", "executor-thread", "executor-interrupt", "integrated-timers"] }
-embassy-futures = "0.1.1"
+embassy-embedded-hal = { version = "0.3", features = ["defmt"] }
+embassy-rp = { version = "0.3", features = ["defmt", "unstable-pac", "time-driver", "critical-section-impl", "rp2040"] }
+embassy-time = { version = "0.4", features = ["defmt"] }
+embassy-sync = { version = "0.6", features = ["defmt"] }
+embassy-executor = { version = "0.7", features = ["defmt", "task-arena-size-98304", "arch-cortex-m", "executor-thread", "executor-interrupt" ] }
+embassy-futures = "0.1"
 static_cell = "2.1.0"
-audio-codec-algorithms = "0.6.0"
+audio-codec-algorithms = "0.7.0"
 
 [[bin]]
 name = "backyard_rain"
