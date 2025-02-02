@@ -10,6 +10,13 @@ Nature soundscape audio. A cozy rain ambience mix for background listening. You 
 
 *"It's such a cozy little app."* -- my brother
 
+## Downloads
+
+[Backyard Rain firmware for 2 MB cards](https://github.com/briandorsey/mtmws_cards/releases/download/BRv0.1.0/backyard_rain_2M_0_1_0.uf2.zip)
+[Backyard Rain firmware for 16 MB cards](https://github.com/briandorsey/mtmws_cards/releases/download/BRv0.1.0/backyard_rain_16M_0_1_0.uf2.zip)
+
+## Documentation
+
 <img src="BR_quickref.png" width="210px">
 
 ```text
@@ -51,4 +58,3 @@ Recording info:
 * Sony A10 recorder & a small Anker USB power supply
 * recorded overnight June 2023, Seattle, WA, USA
 
-Note: a 16MB card is required and will be nearly full of rain audio. 

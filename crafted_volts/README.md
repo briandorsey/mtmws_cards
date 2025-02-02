@@ -6,6 +6,12 @@ A utility card for the WS Computer to manually set control voltages (CV)
 with the input knobs and switch. It also attenuverts (attenuates and inverts)
 incoming voltages.
 
+## Downloads
+
+[Crafted Volts firmware](https://github.com/briandorsey/mtmws_cards/releases/download/v0.1.0/crafted_volts_1_0.uf2)
+
+## Documentation
+
 <img src="CV_quickref.png" width="210px">
 
 ```text
