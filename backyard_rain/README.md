@@ -12,8 +12,8 @@ Nature soundscape audio. A cozy rain ambience mix for background listening. You 
 
 ## Downloads
 
-[Backyard Rain firmware for 2 MB cards](https://github.com/briandorsey/mtmws_cards/releases/download/BRv0.1.0/backyard_rain_2M_0_1_0.uf2.zip)
-[Backyard Rain firmware for 16 MB cards](https://github.com/briandorsey/mtmws_cards/releases/download/BRv0.1.0/backyard_rain_16M_0_1_0.uf2.zip)
+* [Backyard Rain firmware for 2 MB cards](https://github.com/briandorsey/mtmws_cards/releases/download/BRv0.1.0/backyard_rain_2M_0_1_0.uf2.zip)
+* [Backyard Rain firmware for 16 MB cards](https://github.com/briandorsey/mtmws_cards/releases/download/BRv0.1.0/backyard_rain_16M_0_1_0.uf2.zip)
 
 ## Documentation
 
