@@ -7,6 +7,17 @@ authors = ["Brian Dorsey"]
 
 edition = "2021"
 
+[features]
+
+# This set of features chooses which set of WAVs to embed in the firmware.
+# 2m & 16mb variants are release targets for each size of card. Sine and
+# micro variants allow speedier iteration while testing.
+# If no variant is chosen, config will default to "audio_2mb"
+audio_sine = []
+audio_micro = []
+audio_2mb = []
+audio_16mb = []
+
 [dependencies]
 wscomp = { path = "../wscomp" }
 defmt = "0.3"
@@ -26,6 +37,7 @@ embassy-executor = { version = "0.7", features = ["defmt", "task-arena-size-9830
 embassy-futures = "0.1"
 static_cell = "2.1.0"
 audio-codec-algorithms = "0.7.0"
+mutually_exclusive_features = "0.1.0"
 
 [[bin]]
 name = "backyard_rain"

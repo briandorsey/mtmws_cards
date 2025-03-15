@@ -28,6 +28,9 @@ use {defmt_rtt as _, panic_probe as _};
 
 use wscomp::{JackSample, Sample, SampleUpdate};
 
+use mutually_exclusive_features::none_or_one_of;
+none_or_one_of!("audio_sine", "audio_micro", "audio_2mb", "audio_16mb");
+
 // This is a port of the Backyard Rain Soundscape app from Playdate to the
 // Music Thing Modular Workshop System Computer via Rust & Embassy.
 
@@ -652,20 +655,45 @@ impl DACSamplePair {
     }
 }
 
-// const AUDIO_LIGHT: &[u8; 12432] = include_bytes!("../data/sine_light.wav");
-const AUDIO_LIGHT: &[u8; 50320] = include_bytes!("../data/backyard_rain_light_loop_micro.wav");
-// const AUDIO_LIGHT: &[u8; 461844] = include_bytes!("../data/backyard_rain_light_loop_short.wav");
-// const AUDIO_LIGHT: &[u8; 4696052] = include_bytes!("../data/backyard_rain_light_loop.wav");
+#[cfg(feature = "audio_sine")]
+mod audio {
+    pub const AUDIO_LIGHT: &[u8; 12432] = include_bytes!("../data/sine_light.wav");
+    pub const AUDIO_MEDIUM: &[u8; 12432] = include_bytes!("../data/sine_medium.wav");
+    pub const AUDIO_HEAVY: &[u8; 12432] = include_bytes!("../data/sine_heavy.wav");
+}
 
-// const AUDIO_MEDIUM: &[u8; 12432] = include_bytes!("../data/sine_medium.wav");
-const AUDIO_MEDIUM: &[u8; 50320] = include_bytes!("../data/backyard_rain_medium_loop_micro.wav");
-// const AUDIO_MEDIUM: &[u8; 1067054] = include_bytes!("../data/backyard_rain_medium_loop_short.wav");
-// const AUDIO_MEDIUM: &[u8; 7428102] = include_bytes!("../data/backyard_rain_medium_loop.wav");
+#[cfg(feature = "audio_micro")]
+mod audio {
+    pub const AUDIO_LIGHT: &[u8; 50320] =
+        include_bytes!("../data/backyard_rain_light_loop_micro.wav");
+    pub const AUDIO_MEDIUM: &[u8; 50320] =
+        include_bytes!("../data/backyard_rain_medium_loop_micro.wav");
+    pub const AUDIO_HEAVY: &[u8; 50320] =
+        include_bytes!("../data/backyard_rain_heavy_loop_micro.wav");
+}
 
-// const AUDIO_HEAVY: &[u8; 12432] = include_bytes!("../data/sine_heavy.wav");
-const AUDIO_HEAVY: &[u8; 50320] = include_bytes!("../data/backyard_rain_heavy_loop_micro.wav");
-// const AUDIO_HEAVY: &[u8; 482464] = include_bytes!("../data/backyard_rain_heavy_loop_short.wav");
-// const AUDIO_HEAVY: &[u8; 4053120] = include_bytes!("../data/backyard_rain_heavy_loop.wav");
+// default to "audio_2mb" if no other audio_* feature is set
+#[cfg(not(any(
+    feature = "audio_sine",
+    feature = "audio_micro",
+    feature = "audio_16mb"
+)))]
+mod audio {
+    pub const AUDIO_LIGHT: &[u8; 461844] =
+        include_bytes!("../data/backyard_rain_light_loop_short.wav");
+    pub const AUDIO_MEDIUM: &[u8; 1067054] =
+        include_bytes!("../data/backyard_rain_medium_loop_short.wav");
+    pub const AUDIO_HEAVY: &[u8; 482464] =
+        include_bytes!("../data/backyard_rain_heavy_loop_short.wav");
+}
+
+#[cfg(feature = "audio_16mb")]
+mod audio {
+    pub const AUDIO_LIGHT: &[u8; 4696052] = include_bytes!("../data/backyard_rain_light_loop.wav");
+    pub const AUDIO_MEDIUM: &[u8; 7428102] =
+        include_bytes!("../data/backyard_rain_medium_loop.wav");
+    pub const AUDIO_HEAVY: &[u8; 4053120] = include_bytes!("../data/backyard_rain_heavy_loop.wav");
+}
 
 // alternates for testing
 // const AUDIO_MEDIUM: &[u8; 123024] = include_bytes!("../data/sine_long.wav");
@@ -718,9 +746,9 @@ async fn mixer_loop() {
     // the ADPCM blocks and repeatedly cylcing through the data. Offset the
     // starting samples with prime numbers, so the three buffers don't run out
     // and process a full block at the same time.
-    let mut light_samples = adpcm_to_stream(AUDIO_LIGHT, 0);
-    let mut medium_samples = adpcm_to_stream(AUDIO_MEDIUM, 277);
-    let mut heavy_samples = adpcm_to_stream(AUDIO_HEAVY, 691);
+    let mut light_samples = adpcm_to_stream(audio::AUDIO_LIGHT, 0);
+    let mut medium_samples = adpcm_to_stream(audio::AUDIO_MEDIUM, 277);
+    let mut heavy_samples = adpcm_to_stream(audio::AUDIO_HEAVY, 691);
 
     let mut intensity_rcv = INTENSITY.anon_receiver();
     let mut saw_value = 0u16;
