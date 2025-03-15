@@ -18,13 +18,13 @@ use embassy_time::Timer;
 use gpio::{Level, Output};
 use {defmt_rtt as _, panic_probe as _};
 
-use wscomp::{JackSample, Sample, SampleUpdate};
+use wscomp::{JackSample, Sample, SampleUpdate, U12_MAX};
 
 // This is an attempt to learn how use all inputs & outputs of the Music Thing Modular Workshop System Computer via Rust & Embassy.
 // The card maps knobs and the switch to manually set voltages.
 
-// inputs seem to be numbers from 0..4096 (12 bit), sometimes inverted from the thing they represent.
-// outputs seem to be numbers from 0..2048 (11 bit), sometimes inverted from the thing they represent.
+// inputs seem to be numbers from 0..4095 (12 bit), sometimes inverted from the thing they represent.
+// outputs seem to be numbers from 0..4095 (12 bit), inverted from the thing they represent.
 
 // future features, maybe
 // TODO: implement pulse input mixing/logic?
@@ -322,7 +322,7 @@ async fn main(spawner: Spawner) {
 fn led_gamma(value: u16) -> u16 {
     // based on: https://github.com/TomWhitwell/Workshop_Computer/blob/main/Demonstrations%2BHelloWorlds/CircuitPython/mtm_computer.py
     let temp: u32 = value.into();
-    ((temp * temp) / 2048).clamp(0, u16::MAX.into()) as u16
+    ((temp * temp) / U12_MAX as u32).clamp(0, u16::MAX.into()) as u16
 }
 
 #[embassy_executor::task]
@@ -358,8 +358,8 @@ async fn audio_loop(
 
     // LED setup
     let mut c = pwm::Config::default();
-    // 11 bit PWM * 10. 10x is to increase PWM rate, reducing visible flicker.
-    c.top = 20470;
+    // 12 bit PWM * 10. 10x is to increase PWM rate, reducing visible flicker.
+    c.top = 40950;
 
     let pwm5 = pwm::Pwm::new_output_ab(led_pwm_slice, led1_pin, led2_pin, c.clone());
     let (Some(mut led1), Some(mut led2)) = pwm5.split() else {
@@ -376,8 +376,8 @@ async fn audio_loop(
     // 1: unused
     // 2: 0 = 2x gain, 1 = 1x
     // 3: 0 = shutdown channel
-    let dac_config_a = 0b0001000000000000u16;
-    let dac_config_b = 0b1001000000000000u16;
+    let dac_config_a = 0b0011000000000000u16;
+    let dac_config_b = 0b1011000000000000u16;
     let mut dac_buffer: [u8; 2];
 
     loop {
@@ -423,14 +423,14 @@ async fn audio_loop(
             cs.set_high();
 
             // audio LEDs
-            led1.set_duty_cycle_fraction(led_gamma(output_value.to_output()), 2047)
+            led1.set_duty_cycle_fraction(led_gamma(output_value.to_output()), U12_MAX)
                 .unwrap_or_else(|_| {
                     error!(
                         "error setting LED 1 PWM to : {}",
                         led_gamma(output_value.to_output())
                     )
                 });
-            led2.set_duty_cycle_fraction(led_gamma(output_value.to_output_inverted()), 2047)
+            led2.set_duty_cycle_fraction(led_gamma(output_value.to_output_inverted()), U12_MAX)
                 .unwrap_or_else(|_| {
                     error!(
                         "error setting LED 2 PWM to : {}",
@@ -461,9 +461,9 @@ async fn cv_loop(
     let period = (clock_freq_hz / (desired_freq_hz * divider as u32)) as u16 - 1;
 
     // CV PWM setup
-    // Inverted PWM output. Two pole active filtered. Use 11 bit PWM at 60khz.
-    // 2047 = -6v
-    // 1024 =  0v
+    // Inverted PWM output. Two pole active filtered. Use 12 bit PWM at 60khz.
+    // 4095 = -6v
+    // 2048 =  0v
     // 0    = +6v
     let mut cv_pwm_config = pwm::Config::default();
     cv_pwm_config.top = period;
@@ -478,8 +478,8 @@ async fn cv_loop(
 
     // LED PWM setup
     let mut led_pwm_config = pwm::Config::default();
-    // 11 bit PWM * 10. 10x is to increase PWM rate, reducing visible flicker.
-    led_pwm_config.top = 20470;
+    // 12 bit PWM * 10. 10x is to increase PWM rate, reducing visible flicker.
+    led_pwm_config.top = 40950;
 
     let pwm6 = pwm::Pwm::new_output_ab(led_pwm_slice, led3_pin, led4_pin, led_pwm_config.clone());
     let (Some(mut led3), Some(mut led4)) = pwm6.split() else {
@@ -499,7 +499,7 @@ async fn cv_loop(
                 x_value = (*input_cv * x_value) / Sample::OFFSET;
             }
             cv1_pwm
-                .set_duty_cycle_fraction(x_value.to_output_inverted(), 2047)
+                .set_duty_cycle_fraction(x_value.to_output_inverted(), U12_MAX)
                 .unwrap_or_else(|_| {
                     error!(
                         "error setting CV1 PWM to : {}",
@@ -522,7 +522,7 @@ async fn cv_loop(
                 y_value = (*input_cv * y_value) / Sample::OFFSET;
             }
             cv2_pwm
-                .set_duty_cycle_fraction(y_value.to_output_inverted(), 2047)
+                .set_duty_cycle_fraction(y_value.to_output_inverted(), U12_MAX)
                 .unwrap_or_else(|_| {
                     error!(
                         "error setting CV2 PWM to : {}",
@@ -531,14 +531,14 @@ async fn cv_loop(
                 });
 
             // LEDs
-            led3.set_duty_cycle_fraction(led_gamma(x_value.to_output()), 2047)
+            led3.set_duty_cycle_fraction(led_gamma(x_value.to_output()), U12_MAX)
                 .unwrap_or_else(|_| {
                     error!(
                         "error setting LED 3 PWM to : {}",
                         led_gamma(x_value.to_output())
                     )
                 });
-            led4.set_duty_cycle_fraction(led_gamma(y_value.to_output()), 2047)
+            led4.set_duty_cycle_fraction(led_gamma(y_value.to_output()), U12_MAX)
                 .unwrap_or_else(|_| {
                     error!(
                         "error setting LED 4 PWM to : {}",

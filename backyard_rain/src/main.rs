@@ -26,7 +26,7 @@ use portable_atomic::{AtomicU32, Ordering};
 use static_cell::StaticCell;
 use {defmt_rtt as _, panic_probe as _};
 
-use wscomp::{JackSample, Sample, SampleUpdate};
+use wscomp::{JackSample, Sample, SampleUpdate, U12_MAX};
 
 use mutually_exclusive_features::none_or_one_of;
 none_or_one_of!("audio_sine", "audio_micro", "audio_2mb", "audio_16mb");
@@ -34,8 +34,8 @@ none_or_one_of!("audio_sine", "audio_micro", "audio_2mb", "audio_16mb");
 // This is a port of the Backyard Rain Soundscape app from Playdate to the
 // Music Thing Modular Workshop System Computer via Rust & Embassy.
 
-// inputs seem to be numbers from 0..4096 (12 bit), sometimes inverted from the thing they represent.
-// outputs seem to be numbers from 0..2048 (11 bit), sometimes inverted from the thing they represent.
+// inputs seem to be numbers from 0..4095 (12 bit), sometimes inverted from the thing they represent.
+// outputs seem to be numbers from 0..4095 (12 bit), inverted from the thing they represent.
 
 static AUDIO_FREQ_COUNTER: AtomicU32 = AtomicU32::new(0);
 static AUDIO_MAX_TICKS: AtomicU32 = AtomicU32::new(0);
@@ -44,6 +44,7 @@ bind_interrupts!(struct Irqs {
     ADC_IRQ_FIFO => adc::InterruptHandler;
 });
 
+// TODO: troubleshoot AUDIO_MAX_TICKS, seems to be intermittently lagging.
 // TODO: review mutexes... maybe only need CriticalSection for cross-CPU data?
 // single writer, multple reader
 
@@ -281,11 +282,12 @@ async fn logic_loop() {
 fn led_gamma(value: u16) -> u16 {
     // based on: https://github.com/TomWhitwell/Workshop_Computer/blob/main/Demonstrations%2BHelloWorlds/CircuitPython/mtm_computer.py
     let temp: u32 = value.into();
-    ((temp * temp) / 2048).clamp(0, u16::MAX.into()) as u16
+    ((temp * temp) / U12_MAX as u32).clamp(0, u16::MAX.into()) as u16
 }
 
 fn set_led(led: &mut pwm::PwmOutput, value: u16) {
-    led.set_duty_cycle_fraction(led_gamma(value), 2047)
+    // TODO: fix error messge (use actual LED #)
+    led.set_duty_cycle_fraction(led_gamma(value), wscomp::U12_MAX)
         .unwrap_or_else(|_| error!("error setting LED 3 PWM to : {}", led_gamma(value)));
 }
 
@@ -309,8 +311,8 @@ async fn update_pwm_loop(
 
     // LED PWM setup
     let mut led_pwm_config = pwm::Config::default();
-    // 11 bit PWM * 10. 10x is to increase PWM rate, reducing visible flicker.
-    led_pwm_config.top = 20470;
+    // 12 bit PWM * 10. 10x is to increase PWM rate, reducing visible flicker.
+    led_pwm_config.top = 40950;
 
     let pwm5 = pwm::Pwm::new_output_ab(led12_pwm_slice, led1_pin, led2_pin, led_pwm_config.clone());
     let (Some(mut led1), Some(_led2)) = pwm5.split() else {
@@ -341,9 +343,9 @@ async fn update_pwm_loop(
     let period = (clock_freq_hz / (desired_freq_hz * divider as u32)) as u16 - 1;
 
     // CV PWM setup
-    // Inverted PWM output. Two pole active filtered. Use 11 bit PWM at 60khz.
-    // 2047 = -6v
-    // 1024 =  0v
+    // Inverted PWM output. Two pole active filtered. Use 12 bit PWM at 60khz.
+    // 4095 = -6v
+    // 2048 =  0v
     // 0    = +6v
     let mut cv_pwm_config = pwm::Config::default();
     cv_pwm_config.top = period;
@@ -388,7 +390,7 @@ async fn update_pwm_loop(
 
             // set CV1 to intensity
             cv1_pwm
-                .set_duty_cycle_fraction(intensity.to_output_inverted(), 2047)
+                .set_duty_cycle_fraction(intensity.to_output_inverted(), U12_MAX)
                 .unwrap_or_else(|_| {
                     error!(
                         "error setting CV1 PWM to : {}",
@@ -400,7 +402,7 @@ async fn update_pwm_loop(
             if let Some(lfo) = lfo_rcv.try_get() {
                 set_led(&mut led4, lfo.to_output());
                 cv2_pwm
-                    .set_duty_cycle_fraction(lfo.to_output_inverted(), 2047)
+                    .set_duty_cycle_fraction(lfo.to_output_inverted(), U12_MAX)
                     .unwrap_or_else(|_| {
                         error!("error setting CV2 PWM to : {}", lfo.to_output_inverted())
                     });
@@ -644,8 +646,8 @@ impl DACSamplePair {
     // 1: unused
     // 2: 0 = 2x gain, 1 = 1x
     // 3: 0 = shutdown channel
-    const CONFIG1: u16 = 0b0001000000000000u16;
-    const CONFIG2: u16 = 0b1001000000000000u16;
+    const CONFIG1: u16 = 0b0011000000000000u16;
+    const CONFIG2: u16 = 0b1011000000000000u16;
 
     fn new(sample1: u16, sample2: u16) -> Self {
         Self {
@@ -789,8 +791,8 @@ async fn mixer_loop() {
         }
 
         // saw from audio output 2, just because
-        saw_value += 8;
-        if saw_value > 2047 {
+        saw_value += 16;
+        if saw_value > U12_MAX {
             saw_value = 0
         };
 

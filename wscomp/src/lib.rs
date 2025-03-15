@@ -1,7 +1,7 @@
 #![cfg_attr(not(test), no_std)]
 
 use core::fmt::Debug;
-use core::ops::{Add, Div, Mul, Shr, Sub};
+use core::ops::{Add, Div, Mul, Sub};
 
 use defmt::*;
 
@@ -9,6 +9,8 @@ use defmt::*;
 //
 // TODO: clean up to_output methods... flags, something? Think about the design.
 // TODO: think about constructors, probably want to error when value out of range.
+
+pub const U12_MAX: u16 = 2u16.pow(12) - 1;
 
 /// A 12 bit value representing input from a knob or input jack's ADC
 ///
@@ -68,27 +70,27 @@ impl Sample {
         Self::new(output, invert)
     }
 
-    /// Saturating conversion into 11 bit safe u16 for output
+    /// Saturating conversion into 12 bit safe u16 for output
     pub fn to_output(&self) -> u16 {
-        // clamp self, divide by 2 (by shifting right) and convert to u16
-        (self.to_clamped() + Self::OFFSET).shr(1) as u16
+        // clamp self and convert to u16
+        (self.to_clamped() + Self::OFFSET) as u16
     }
 
-    /// Saturating conversion into 11 bit safe u16 for output, inverted
+    /// Saturating conversion into 12 bit safe u16 for output, inverted
     pub fn to_output_inverted(&self) -> u16 {
-        2047_u16.saturating_sub(self.to_output())
+        U12_MAX.saturating_sub(self.to_output())
     }
 
-    /// Saturating conversion into 11 bit safe u16 for output, absolute value.
+    /// Saturating conversion into 12 bit safe u16 for output, absolute value.
     pub fn to_output_abs(&self) -> u16 {
         // clamp self, take absolute value, clamp to max (negative i values
         // are one larger than positive), and convert to u16
         (self.to_clamped().abs()).min(Self::MAX) as u16
     }
 
-    /// Saturating conversion into 11 bit safe u16 for output, inverted
+    /// Saturating conversion into 12 bit safe u16 for output, inverted
     pub fn to_output_abs_inverted(&self) -> u16 {
-        2047_u16.saturating_sub(self.to_output_abs())
+        U12_MAX.saturating_sub(self.to_output_abs())
     }
 
     pub fn to_clamped(&self) -> i32 {
@@ -268,7 +270,7 @@ impl JackSample {
 #[cfg(test)]
 mod test {
     // Note this useful idiom: importing names from outer (for mod tests) scope.
-    use super::{Sample, SampleUpdate};
+    use super::{Sample, SampleUpdate, U12_MAX};
 
     #[test]
     fn test_input_value_basics() {
@@ -288,23 +290,22 @@ mod test {
     fn test_input_value_from() {
         assert_eq!(Sample::from_u16(0, false).to_clamped(), Sample::MIN);
         assert_eq!(Sample::from_u16(2048, false).to_clamped(), 0);
-        assert_eq!(Sample::from_u16(4095, false).to_clamped(), Sample::MAX);
+        assert_eq!(Sample::from_u16(U12_MAX, false).to_clamped(), Sample::MAX);
     }
 
     #[test]
     fn test_input_value_to_output() {
-        assert_eq!(Sample::new(Sample::CENTER, false).to_output(), 1024_u16);
+        assert_eq!(Sample::new(Sample::CENTER, false).to_output(), 2048_u16);
 
-        // output values are half of input (11 bit from 12 bit)
         assert_eq!(Sample::from_u16(0, false).to_output(), 0);
-        assert_eq!(Sample::from_u16(2_u16, false).to_output(), 1_u16);
-        assert_eq!(Sample::from_u16(1024_u16, false).to_output(), 512_u16);
-        assert_eq!(Sample::from_u16(2048_u16, false).to_output(), 1024_u16);
+        assert_eq!(Sample::from_u16(2_u16, false).to_output(), 2_u16);
+        assert_eq!(Sample::from_u16(1024_u16, false).to_output(), 1024_u16);
+        assert_eq!(Sample::from_u16(2048_u16, false).to_output(), 2048_u16);
 
-        // clamp to 11 bit values in to_output() when inputs are above range
-        assert_eq!(Sample::from_u16(8000, false).to_output(), 2047_u16);
-        assert_eq!(Sample::from_u16(5000, false).to_output(), 2047_u16);
-        assert_eq!(Sample::from_u16(4096, false).to_output(), 2047_u16);
+        // clamp to 12 bit values in to_output() when inputs are above range
+        assert_eq!(Sample::from_u16(8000, false).to_output(), U12_MAX);
+        assert_eq!(Sample::from_u16(5000, false).to_output(), U12_MAX);
+        assert_eq!(Sample::from_u16(4096, false).to_output(), U12_MAX);
 
         let below_range = Sample::from_u16(0, false) - Sample::new(5000, false);
         assert_eq!(below_range.to_output(), 0_u16);
@@ -312,21 +313,49 @@ mod test {
 
     #[test]
     fn test_input_value_inverted_to_output() {
-        assert_eq!(Sample::new(Sample::CENTER, true).to_output(), 1024_u16);
+        assert_eq!(Sample::new(Sample::CENTER, true).to_output(), 2048_u16);
 
-        // output values are half of input (11 bit from 12 bit)
-        assert_eq!(Sample::from_u16(0, true).to_output(), 2047);
-        // assert_eq!(InputValue::from_u16(2_u16, true).to_output(), 2046_u16);
-        assert_eq!(Sample::from_u16(1024_u16, true).to_output(), 1536_u16);
-        assert_eq!(Sample::from_u16(2047_u16, true).to_output(), 1024_u16);
+        assert_eq!(Sample::from_u16(0, true).to_output(), U12_MAX);
+        assert_eq!(Sample::from_u16(1_u16, true).to_output(), U12_MAX);
+        assert_eq!(Sample::from_u16(2_u16, true).to_output(), 4094_u16);
+        assert_eq!(Sample::from_u16(1024_u16, true).to_output(), 3072_u16);
+        assert_eq!(Sample::from_u16(U12_MAX, true).to_output(), 1_u16);
 
-        // clamp to 11 bit values in to_output() when inputs are above range
+        // clamp to 12 bit values in to_output() when inputs are above range
         assert_eq!(Sample::from_u16(8000, true).to_output(), 0_u16);
         assert_eq!(Sample::from_u16(5000, true).to_output(), 0_u16);
         assert_eq!(Sample::from_u16(4096, true).to_output(), 0_u16);
 
         let below_range = Sample::from_u16(0, true) - Sample::new(5000, true);
-        assert_eq!(below_range.to_output(), 2047_u16);
+        assert_eq!(below_range.to_output(), U12_MAX);
+    }
+
+    #[test]
+    fn test_input_value_to_output_inverted() {
+        let samples = vec![
+            Sample::new(Sample::CENTER, false),
+            Sample::from_u16(0, false),
+            Sample::from_u16(1, false),
+            Sample::from_u16(2_u16, false),
+            Sample::from_u16(1024_u16, false),
+            Sample::from_u16(2048_u16, false),
+            // above 12 bit range
+            Sample::from_u16(4096_u16, false),
+            Sample::from_u16(5000_u16, false),
+            Sample::from_u16(8000_u16, false),
+            // below zero sample
+            Sample::from_u16(0, false) - Sample::new(5000, false),
+        ];
+
+        for sample in samples {
+            println!(
+                "val: {}, inverted: {}, MAX-val: {}",
+                sample.to_output(),
+                sample.to_output_inverted(),
+                U12_MAX - sample.to_output_inverted()
+            );
+            assert_eq!(sample.to_output(), U12_MAX - sample.to_output_inverted());
+        }
     }
 
     #[test]
