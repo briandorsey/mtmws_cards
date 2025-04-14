@@ -1,6 +1,8 @@
 
 # Backyard Rain Soundscape
 
+![](BR_title_card.png)
+
 A port of the [Backyard Rain Soundscape](https://briandorsey.itch.io/backyard-rain-soundscape) Playdate app to the Music Thing Modular Workshop System Computer. 
 
 Nature soundscape audio. A cozy rain ambience mix for background listening. You control the intensity. This card plays rain ambience which was recorded in my backyard. 
