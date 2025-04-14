@@ -8,7 +8,7 @@ incoming voltages.
 
 ## Downloads
 
-* [Crafted Volts firmware](https://github.com/briandorsey/mtmws_cards/releases/download/v0.1.0/crafted_volts_1_0.uf2)
+* [Crafted Volts firmware](https://github.com/briandorsey/mtmws_cards/releases/download/v0.2.0/crafted_volts_0_2_0.uf2)
 
 ## Documentation
 
