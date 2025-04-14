@@ -6,7 +6,8 @@ A port of the [Backyard Rain Soundscape](https://briandorsey.itch.io/backyard-ra
 Nature soundscape audio. A cozy rain ambience mix for background listening. You control the intensity. This card plays rain ambience which was recorded in my backyard. 
 
 * Use the main knob to adjust rain intensity. (it cross fades between three recordings)
-* Never hear the loops: detailed natural recordings recordings of different lengths and slowly adjusted playback mix. (LFO mixed with main knob.) 
+* Never hear the loops: detailed natural recordings of different lengths and slowly crossfaded playback mix. (LFO mixed with main knob.) 
+* In synth terms, you could think of it as a noise oscillator sourced from nature. 
 
 *"It's such a cozy little app."* -- my brother
 
@@ -25,11 +26,11 @@ Download the firmware which matches the size card you have (most are 2 MB cards)
 
 ```text
 This card crossfades between three loops of recorded rain. Heavy, medium, and
-light rain. The current crossfade is "intensity", and intensity controlled with
-the Main knob. Where max is full heavy, center is full medium, min is fully
-light, and every point in between is a cross fade between two recordings. For
-example, halfway between center and max would be a 50/50 mix of medium and heavy
-rain.
+light rain. The current crossfade location is called "intensity", and intensity
+is controlled with the Main knob. Where max is full heavy, center is full
+medium, min is full light, and every point in between is a cross fade between
+two recordings. For example, halfway between center and max would be a 50/50 mix
+of medium and heavy rain.
 
 Audio output 1: Backyard rain audio. Main knob position mapped to intensity.
 Audio input  1: (if any) is mixed with Main knob position, Main knob acts as
