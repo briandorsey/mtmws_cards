@@ -10,6 +10,10 @@ incoming voltages.
 
 * [Crafted Volts firmware](https://github.com/briandorsey/mtmws_cards/releases/download/v0.2.0/crafted_volts_0_2_0.uf2)
 
+## Installation
+
+Download the firmware above. Then follow the "How do I write a blank program card?" instructions from the [Computer and Program Card Guide](https://www.musicthing.co.uk/Computer_Program_Cards/). 
+
 ## Documentation
 
 <img src="CV_quickref.png" width="210px">

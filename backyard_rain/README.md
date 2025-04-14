@@ -15,6 +15,10 @@ Nature soundscape audio. A cozy rain ambience mix for background listening. You 
 * [Backyard Rain firmware for 2 MB cards](https://github.com/briandorsey/mtmws_cards/releases/download/v0.2.0/backyard_rain_2M_0_2_0.uf2.zip)
 * [Backyard Rain firmware for 16 MB cards](https://github.com/briandorsey/mtmws_cards/releases/download/v0.2.0/backyard_rain_16M_0_2_0.uf2.zip)
 
+## Installation
+
+Download the firmware which matches the size card you have (most are 2 MB cards). Unzip the `uf2` file. Then follow the "How do I write a blank program card?" instructions from the [Computer and Program Card Guide](https://www.musicthing.co.uk/Computer_Program_Cards/). 
+
 ## Documentation
 
 <img src="BR_quickref.png" width="210px">
