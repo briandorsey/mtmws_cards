@@ -1,5 +1,7 @@
 # Customizing Backyard Rain
 
+Author: [MJLMills](https://github.com/MJLMills)
+
 The use of WAV chunk parsing instead of using a fixed offset or raw 
 samples opens the door to the replacement of the original audio files in
 Backyard Rain. This allows customization with other field recordings.
