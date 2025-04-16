@@ -16,7 +16,7 @@ be consulted.
 
 The three files to be played back by the module need to be prepared in 
 advance of editing the program source code. The files should be exported
-as single-channel ADPCM WAV files with a sample rate of 44.1 kHz. The 
+as single-channel ADPCM WAV files with a sample rate of 48 kHz. The 
 loop lengths need not be exact, but their total file size is limited by
 the capacity of the program card. For Backyard Rain, the following lengths
 are used.
