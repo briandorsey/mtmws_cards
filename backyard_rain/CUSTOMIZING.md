@@ -58,10 +58,11 @@ The filename and size are specified in lines with the following format:
 
 `pub const AUDIO_LIGHT: &[u8; 461844] = include_bytes!("../data/backyard_rain_light_loop_short.wav");`
 
+These lines reserve the exact number of bytes and include the WAV file in the firmware image.
 The number with value 461844 in this example must be replaced with the size of
 the file in bytes. This should be available by inspecting the file's properties 
 via a right-click. The filename should be replaced with the name of each custom
-WAV file placed in `backyard_rain/data` in an earlier step.
+WAV file placed in `backyard_rain/data` in the earlier audio file preparation step.
 
 ### Compile the Card
 
