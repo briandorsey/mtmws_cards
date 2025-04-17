@@ -58,10 +58,13 @@ LEDs: 1  2
 4             : Internal slow triangle LFO. Dark = -6v (moves very slowly)
 ```
 
-Recording info:
+## Recording info:
 
 * LOM Uši omni microphones, separated by about 1.5m (5ft)
 * Cinela Leonard wind protection
 * Sony A10 recorder & a small Anker USB power supply
 * recorded overnight June 2023, Seattle, WA, USA
 
+## Customization
+
+It's possible to create a customized edition of the card with recordings from your own backyard... or elsewhere :). See [CUSTOMIZING.md](CUSTOMIZING.md) for details. 
