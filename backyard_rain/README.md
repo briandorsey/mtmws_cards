@@ -22,6 +22,11 @@ Nature soundscape audio. A cozy rain ambience mix for background listening. You 
 
 Download the firmware which matches the size card you have (most are 2 MB cards). Unzip the `uf2` file. Then follow the "How do I write a blank program card?" instructions from the [Computer and Program Card Guide](https://www.musicthing.co.uk/Computer_Program_Cards/). 
 
+> [!NOTE]
+> Writing a card takes longer than you might expect. A 16 MB card takes about 4.5 minutes on my computer. Since Backyard Rain uses nearly all the space on both the 2 MB and 16 MB cards, it will likely be longer than other cards you may have written previously.
+>
+> Firmware updates *look* like a file copy, but unlike a regular file copy, writing the firmware doesn't seem to update the file copy progress bar. It appears to get stuck until the whole copy is finished.
+
 ## Documentation
 
 <img src="BR_quickref.png" width="210px">
