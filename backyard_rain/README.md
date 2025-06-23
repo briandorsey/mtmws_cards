@@ -13,6 +13,11 @@ Nature soundscape audio. A cozy rain ambience mix for background listening. You 
 
 *"It's such a cozy little app."* -- my brother
 
+## Reviews & demos
+
+* [Mylar Melodies - Music Thing Workshop System modular synth demo.
+](https://youtu.be/ABbWmZOtmig?si=bKNxzY5MFJ0kZ6UB&t=1772) (link to the Backyard Rain section of the video)
+
 ## Downloads
 
 * [Backyard Rain firmware for 2 MB cards](https://github.com/briandorsey/mtmws_cards/releases/download/v0.2.0/backyard_rain_2M_0_2_0.uf2.zip)
